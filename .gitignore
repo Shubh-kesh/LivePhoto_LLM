@@ -1,0 +1,81 @@
+# ---------------------------------------------------------------------------
+# LivePhoto .gitignore
+# Protect secrets, credentials, biometric data and local build artifacts.
+# ---------------------------------------------------------------------------
+
+# ---- Environment & secrets -------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*.jks
+secrets/
+
+# ---- Python / backend -------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+dist/
+build/
+
+# ---- Node / frontend ---------------------------------------------------------
+node_modules/
+frontend/dist/
+frontend/coverage/
+npm-debug.log*
+
+# ---- ML / data (never commit biometric or customer data) ---------------------
+ml/datasets/*
+!ml/datasets/README.md
+ml/experiments/data/
+models/
+*.onnx
+*.pt
+*.pth
+*.h5
+*.pb
+*.tflite
+*.joblib
+*.pkl
+
+# ---- Biometric captures / local object storage --------------------------------
+captures/
+raw-captures/
+local-object-storage/
+objectstore-data/
+minio-data/
+uploads/
+media/
+
+# ---- Logs ---------------------------------------------------------------------
+*.log
+logs/
+
+# ---- Certificates -------------------------------------------------------------
+certs/
+
+# ---- IDE / editor ---------------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+*.swo
+*.orig
+
+# ---- OS -------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
