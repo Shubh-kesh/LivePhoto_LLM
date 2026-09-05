@@ -1,8 +1,8 @@
 # LivePhoto — Roadmap (M0 Baseline, updated for M1)
 
-Status: **M0 COMPLETE, M1 COMPLETE, M2 COMPLETE.** M3+ are planned and are **not implemented** in
-M2. Each milestone: goal / scope / non-scope / dependencies / deliverables / acceptance criteria /
-major risks.
+Status: **M0 COMPLETE, M1 COMPLETE, M2 COMPLETE, M3 COMPLETE.** M4+ are planned and are **not
+implemented** in M3. Each milestone: goal / scope / non-scope / dependencies / deliverables /
+acceptance criteria / major risks.
 
 Dependencies and acceptance criteria reference the design docs in this repository. Milestones may
 be re-sequenced as evaluation results (M4–M9) dictate.
@@ -55,14 +55,22 @@ be re-sequenced as evaluation results (M4–M9) dictate.
 - **Major risks:** Browser/WebView camera quirks; secure-context on mobile.
 
 ## M3 — Image Quality Engine
+- **Status: COMPLETE.**
 - **Goal:** Quality + face validation as first validators.
-- **Scope:** Face detection/count/bbox/landmarks; blur; exposure/lighting; face-size/occlusion/
-  pose; map to reason codes (NO_FACE, MULTIPLE_FACES, BLURRED, etc.).
-- **Non-scope:** Attack detection; VLM; decisions beyond RETRY/quality semantics.
+- **Scope:** Face detection provider abstraction + MediaPipe implementation; live preview quality
+  analysis (throttled/backpressured) with customer guidance; per-frame and bundle quality
+  assessment; quality-based representative-frame ranking (`frame-ranking-v1`); quality-retry
+  flow; normalized pixel metrics (luminance/dark/bright ratio, contrast, Laplacian sharpness);
+  deterministic reason codes; provisional quality config (`quality-v1`); model-asset provisioning
+  with pinned SHA-256; Playwright E2E with stub face provider + synthetic checkerboard camera.
+- **Non-scope:** Attack detection; VLM; decisions beyond RETRY/quality semantics; backend upload.
 - **Dependencies:** M2.
-- **Deliverables:** Face + quality validators; quality-based RETRY.
-- **Acceptance criteria:** Reason codes emitted; bias benchmarked across skin tones/devices.
-- **Major risks:** Bias/fairness; lighting variance.
+- **Deliverables:** `quality/` subsystem; docs (`QUALITY_ENGINE_DESIGN.md`,
+  `QUALITY_CONFIGURATION.md`); model-assets provisioning; compatibility matrix update.
+- **Acceptance criteria:** All M3 checks green (pixel metrics, face scenarios, bundle ranking,
+  guidance, state machine, flow, UI, E2E ready + retry); backend regression green.
+- **Major risks:** Thresholds provisional; detector/model unverified on real devices (physical
+  gate required before meaningful M4 accuracy).
 
 ## M4 — VLM-Only Baseline (Experiment A)
 - **Goal:** Stand up VLM-only pipeline on external POC providers.

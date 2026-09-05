@@ -1,0 +1,14 @@
+{
+  "model": {
+    "name": "mediapipe-face-detector",
+    "upstream_source": "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite",
+    "version": "blaze_face_short_range float16 v1 (MediaPipe tasks-vision 1.0.1)",
+    "sha256": "",
+    "status": "pending-pin",
+    "license": "Apache-2.0 (MediaPipe models)",
+    "license_source": "https://github.com/google-ai-edge/mediapipe/blob/master/LICENSE",
+    "expected_local_path": "frontend/model-assets/face_detector.task",
+    "runtime_references": ["frontend/src/features/capture/quality/face/MediaPipeFaceDetector.ts"],
+    "notes": "SHA-256 must be pinned here after the first trusted download (see scripts/setup-face-assets.sh and model-assets/README.md). The wasm runtime is copied from @mediapipe/tasks-vision to frontend/public/mediapipe-wasm."
+  }
+}

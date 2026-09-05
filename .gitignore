@@ -42,6 +42,7 @@ frontend/test-results/
 frontend/playwright-report/
 frontend/blob-report/
 frontend/playwright/.cache/
+frontend/e2e/.fixtures/
 
 # ---- ML / data (never commit biometric or customer data) ---------------------
 ml/datasets/*
@@ -56,6 +57,10 @@ models/
 *.tflite
 *.joblib
 *.pkl
+
+# ---- Face model / MediaPipe assets (downloaded at dev setup; not committed) ----
+frontend/model-assets/face_detector.task
+frontend/public/mediapipe-wasm/
 
 # ---- Biometric captures / local object storage --------------------------------
 captures/

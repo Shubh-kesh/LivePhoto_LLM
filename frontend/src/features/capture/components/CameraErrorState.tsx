@@ -1,12 +1,13 @@
 /**
- * Camera error state (M2 §38-39, §58). Safe customer-facing messages only; raw browser messages
- * and device details are never shown.
+ * Error state (M3 §113-115). Technical camera errors and quality-analysis failures are distinct:
+ * the heading and message adapt to the error type. Safe customer-facing messages only.
  */
 
-import type { CameraError } from '../media/mediaErrors'
+import type { FlowError } from '../hooks/flowError'
+import { isQualityFlowError } from '../hooks/flowError'
 
 interface CameraErrorStateProps {
-  error: CameraError
+  error: FlowError
   canRetryStream: boolean
   onRetryStream: () => void
   onRestart: () => void
@@ -20,9 +21,12 @@ export function CameraErrorState({
   onRestart,
   onReset,
 }: CameraErrorStateProps) {
+  const heading = isQualityFlowError(error)
+    ? "We couldn't check photo quality."
+    : "We couldn't access your camera"
   return (
     <section className="capture-error" aria-labelledby="capture-error-heading">
-      <h2 id="capture-error-heading">We couldn't access your camera</h2>
+      <h2 id="capture-error-heading">{heading}</h2>
       <p id="capture-error-message" role="alert">
         {error.safeMessage}
       </p>

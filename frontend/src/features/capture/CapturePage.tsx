@@ -1,6 +1,7 @@
 /**
- * Capture page (M2 §1, §45, §55-59). Wires the capture flow into a responsive, accessible UI.
- * No liveness language is shown: the only completion statement is "Photo captured successfully."
+ * Capture page (M2 §1, §45, §55-59 + M3 §60-68). Wires the capture flow into a responsive,
+ * accessible UI with live quality guidance, quality analysis and quality-retry states.
+ * No liveness language is ever shown.
  */
 
 import { useCallback, useState } from 'react'
@@ -10,27 +11,54 @@ import { CameraIntroduction } from './components/CameraIntroduction'
 import { CameraViewport } from './components/CameraViewport'
 import { CaptureDiagnostics } from './components/CaptureDiagnostics'
 import { CapturePreview } from './components/CapturePreview'
+import { QualityChecking } from './components/QualityChecking'
+import { QualityRetryScreen } from './components/QualityRetryScreen'
 import { useCaptureFlow, type UseCaptureFlowResult } from './hooks/useCaptureFlow'
 import type { CaptureBundle } from './types/capture'
+import type { FaceDetectorProvider } from './quality/face/FaceDetectorProvider'
+import type { BundleQualityAssessment } from './quality/types/quality'
 import './capture.css'
 
-export function CapturePage() {
+export function CapturePage({
+  faceDetector,
+  analyzeBundle,
+}: {
+  faceDetector?: FaceDetectorProvider
+  analyzeBundle?: (bundle: CaptureBundle) => Promise<BundleQualityAssessment>
+}) {
   const [confirmedBundle, setConfirmedBundle] = useState<CaptureBundle | null>(null)
   const onBundleReady = useCallback((bundle: CaptureBundle) => {
     setConfirmedBundle(bundle)
   }, [])
 
-  const flow = useCaptureFlow({ onBundleReady })
+  const flow = useCaptureFlow({ onBundleReady, faceDetector, analyzeBundle })
   const isFrontCamera = flow.cameraSettings.facingMode !== 'environment'
+  // Keep the single stable <video> mounted for every phase where the camera session may be alive
+  // so the attached stream survives phase transitions (M2 §12, M3 §60).
+  const activeCameraPhases = [
+    'requestingPermission',
+    'streaming',
+    'switchingCamera',
+    'capturing',
+    'analyzing',
+    'qualityRetry',
+  ] as const
+  const isActiveCameraPhase = activeCameraPhases.includes(
+    flow.state as (typeof activeCameraPhases)[number],
+  )
 
   return (
     <main className="capture-page">
       <h1>LivePhoto</h1>
 
-      {(flow.state === 'requestingPermission' ||
-        flow.state === 'streaming' ||
-        flow.state === 'switchingCamera' ||
-        flow.state === 'capturing') && (
+      {(flow.state === 'idle' || flow.state === 'requestingPermission') && (
+        <CameraIntroduction
+          onStart={() => void flow.startCamera()}
+          pending={flow.state === 'requestingPermission'}
+        />
+      )}
+
+      {isActiveCameraPhase && (
         <CameraViewport
           videoRef={flow.videoRef}
           isFrontCamera={isFrontCamera}
@@ -39,16 +67,21 @@ export function CapturePage() {
           isSwitching={flow.state === 'switchingCamera'}
           captureProgress={flow.captureProgress}
           transientMessage={flow.transientMessage}
+          guidance={flow.liveGuidance}
+          detectorStatus={flow.detectorState}
           hidden={flow.state === 'requestingPermission'}
           onSwitchCamera={() => void flow.switchCamera()}
           onCapture={() => void flow.capture()}
         />
       )}
 
-      {(flow.state === 'idle' || flow.state === 'requestingPermission') && (
-        <CameraIntroduction
-          onStart={() => void flow.startCamera()}
-          pending={flow.state === 'requestingPermission'}
+      {flow.state === 'analyzing' && <QualityChecking />}
+
+      {flow.state === 'qualityRetry' && (
+        <QualityRetryScreen
+          guidance={flow.retryGuidance}
+          onRetake={() => void flow.retryRetake()}
+          onReset={flow.reset}
         />
       )}
 
@@ -84,7 +117,10 @@ export function CapturePage() {
         />
       )}
 
-      <CaptureDiagnostics diagnostics={flow.diagnostics} />
+      <CaptureDiagnostics
+        diagnostics={flow.diagnostics}
+        quality={{ bundle: flow.qualityAssessment }}
+      />
     </main>
   )
 }

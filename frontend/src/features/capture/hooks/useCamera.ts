@@ -26,6 +26,8 @@ export interface UseCameraResult {
   start: (facingMode?: FacingMode) => Promise<void>
   switchCamera: () => Promise<void>
   stop: () => void
+  /** Whether a camera session is currently active (ref-backed, for async flow decisions). */
+  isActive: () => boolean
 }
 
 export function useCamera({ videoRef, onTrackEnded }: UseCameraOptions): UseCameraResult {
@@ -120,13 +122,26 @@ export function useCamera({ videoRef, onTrackEnded }: UseCameraOptions): UseCame
   )
 
   const switchCamera = useCallback(async (): Promise<void> => {
-    const currentFacing = sessionRef.current?.settings.facingMode
-    const nextMode: FacingMode = currentFacing === 'environment' ? 'user' : 'environment'
+    const previousFacing: FacingMode =
+      sessionRef.current?.settings.facingMode === 'environment' ? 'environment' : 'user'
+    const nextMode: FacingMode = previousFacing === 'environment' ? 'user' : 'environment'
     const generation = ++generationRef.current
     setError(null)
+
+    // M3 §76: stop the previous camera FIRST so no two camera streams are required to be open
+    // concurrently (safer mobile compatibility).
+    const previous = sessionRef.current
+    if (previous) {
+      intentionalStopRef.current = true
+      previous.stop()
+    }
+    sessionRef.current = null
+    setSession(null)
+    if (videoRef.current) {
+      videoRef.current.srcObject = null
+    }
+
     try {
-      // Request the alternate camera first; only stop the current one on success so a failed
-      // switch leaves the current camera usable (M2 §17).
       const next = await requestCameraStream({ facingMode: nextMode })
       if (generation !== generationRef.current) {
         next.stop()
@@ -139,11 +154,32 @@ export function useCamera({ videoRef, onTrackEnded }: UseCameraOptions): UseCame
       }
     } catch (caught) {
       if (generation !== generationRef.current) return
-      const cameraError = toCameraError(caught)
-      setError(cameraError)
-      throw cameraError
+      const primaryError = toCameraError(caught)
+      // Attempt to reacquire the previous camera (M3 §76). A recovered camera is still a usable
+      // stream; the caller surfaces a recoverable message.
+      try {
+        const recovered = await requestCameraStream({ facingMode: previousFacing })
+        if (generation !== generationRef.current) {
+          recovered.stop()
+          return
+        }
+        await adoptSession(recovered)
+        if (generation !== generationRef.current) {
+          recovered.stop()
+          return
+        }
+        throw new CameraError('CAMERA_SWITCH_FAILED')
+      } catch (recoveryCaught) {
+        if (generation !== generationRef.current) return
+        if (recoveryCaught instanceof CameraError) {
+          setError(recoveryCaught)
+          throw recoveryCaught
+        }
+        setError(primaryError)
+        throw primaryError
+      }
     }
-  }, [adoptSession])
+  }, [adoptSession, videoRef])
 
   const stop = useCallback((): void => {
     generationRef.current += 1
@@ -158,13 +194,15 @@ export function useCamera({ videoRef, onTrackEnded }: UseCameraOptions): UseCame
     }
   }, [videoRef])
 
+  const isActive = useCallback((): boolean => sessionRef.current !== null, [])
+
   useEffect(() => {
     return () => {
       stop()
     }
   }, [stop])
 
-  return { session, settings, canSwitch, error, start, switchCamera, stop }
+  return { session, settings, canSwitch, error, start, switchCamera, stop, isActive }
 }
 
 /** Best-effort: only offer camera switching when >= 2 videoinput devices exist (M2 §16-17). */

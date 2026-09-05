@@ -138,7 +138,23 @@ docs/             M0 architecture baseline + this guide
 - Capture the complete frame; never crop to the face guide.
 - Pair every `URL.createObjectURL` with `URL.revokeObjectURL`.
 
-## 14. Session-state contract (M1)
+## 14. Quality-engine conventions (M3)
+
+- Pixel metrics operate on a normalized grayscale analysis buffer (max dimension 640, Rec. 709
+  luminance 0..1); original capture blobs are never modified.
+- `overallQualityScore` is the minimum of component scores and is NOT a probability, liveness
+  confidence or spoof probability.
+- All thresholds live in `quality/config/qualityConfig.ts` (`quality-v1`) and are documented as
+  PROVISIONAL (M9 calibration). Config changes require a new version.
+- Face detection goes through `FaceDetectorProvider`; capture code never touches MediaPipe.
+  Detector failure → `FACE_ANALYSIS_UNAVAILABLE`; analysis failure → `QUALITY_ANALYSIS_ERROR`;
+  neither is ever an image-quality classification.
+- Live guidance is throttled (~3 Hz) with backpressure (one analysis at a time, skip when busy)
+  and stabilized over 2 consecutive analyses.
+- The stub face detector is selected only when the build sets `VITE_FACE_PROVIDER=stub` (test/E2E);
+  no production path can force QUALITY_READY.
+
+## 15. Session-state contract (M1)
 
 `backend/app/domain/session.py` defines `SessionState` (lifecycle) separate from
 `DecisionOutcome` (liveness decision). Conceptual transitions (implemented in a later milestone):

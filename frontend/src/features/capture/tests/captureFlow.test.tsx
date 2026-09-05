@@ -8,6 +8,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { CaptureHarness } from './CaptureHarness'
 import type { CaptureBundle } from '../types/capture'
+import type { FaceDetectorProvider } from '../quality/face/FaceDetectorProvider'
+import type { BundleQualityAssessment } from '../quality/types/quality'
 import {
   createDeviceInfo,
   createFakeStream,
@@ -16,6 +18,12 @@ import {
   setupMediaEnvironment,
   removeMediaDevices,
 } from './mediaFakes'
+import {
+  FakeFaceDetector,
+  readyBundleAssessment,
+  retryBundleAssessment,
+  unavailableBundleAssessment,
+} from './qualityFakes'
 
 interface Harness {
   video: HTMLVideoElement
@@ -25,18 +33,31 @@ interface Harness {
 interface RenderHarnessOptions {
   useRvf?: boolean
   onBundleReady?: (bundle: CaptureBundle) => void
+  faceDetector?: FaceDetectorProvider
+  analyzeBundle?: (bundle: CaptureBundle) => Promise<BundleQualityAssessment>
 }
 
 function renderHarness(options: RenderHarnessOptions = {}): {
   env: MediaEnvironment
   h: Harness
   unmount: () => void
+  detector: FakeFaceDetector
 } {
   const env = setupMediaEnvironment(options)
-  const utils = render(<CaptureHarness onBundleReady={options.onBundleReady} />)
+  const detector = (options.faceDetector ?? new FakeFaceDetector()) as FakeFaceDetector
+  const analyzeBundle =
+    options.analyzeBundle ??
+    ((bundle: CaptureBundle) => Promise.resolve(readyBundleAssessment(bundle)))
+  const utils = render(
+    <CaptureHarness
+      onBundleReady={options.onBundleReady}
+      faceDetector={detector}
+      analyzeBundle={analyzeBundle}
+    />,
+  )
   const video = utils.container.querySelector('[data-testid="harness-video"]') as HTMLVideoElement
   const fireLoadedMetadata = () => video.dispatchEvent(new Event('loadedmetadata'))
-  return { env, h: { video, fireLoadedMetadata }, unmount: utils.unmount }
+  return { env, h: { video, fireLoadedMetadata }, unmount: utils.unmount, detector }
 }
 
 function captureStreams(env: MediaEnvironment) {
@@ -371,5 +392,81 @@ describe('capture flow', () => {
     expect(streams[0].track.stop).toHaveBeenCalled()
     expect(env.objectUrls.revokeObjectURL).toHaveBeenCalledWith(previewUrl)
     expect(screen.queryByTestId('preview-img')).not.toBeInTheDocument()
+  })
+
+  it('moves through ANALYZING and reports a QUALITY_READY disposition', async () => {
+    let pendingBundle: CaptureBundle | null = null
+    let resolveAnalysis: ((assessment: BundleQualityAssessment) => void) | null = null
+    const { env, h } = renderHarness({
+      analyzeBundle: (bundle) =>
+        new Promise((resolve) => {
+          pendingBundle = bundle
+          resolveAnalysis = resolve
+        }),
+    })
+    await startCameraToStreaming(env, h)
+
+    fireEvent.click(screen.getByText('capture'))
+    await waitFor(() => expect(phaseElement()).toHaveTextContent('analyzing'))
+    expect(screen.getByTestId('quality-disposition')).toHaveTextContent('none')
+
+    await act(async () => {
+      resolveAnalysis?.(readyBundleAssessment(pendingBundle as CaptureBundle))
+    })
+    await waitFor(() => expect(phaseElement()).toHaveTextContent('preview'))
+    expect(screen.getByTestId('quality-disposition')).toHaveTextContent('QUALITY_READY')
+  })
+
+  it('routes QUALITY_RETRY to the retry screen, then recovers via retake', async () => {
+    let retryNext = true
+    const { env, h } = renderHarness({
+      analyzeBundle: async (bundle) => {
+        if (retryNext) {
+          retryNext = false
+          return retryBundleAssessment(bundle, ['NO_FACE'])
+        }
+        return readyBundleAssessment(bundle)
+      },
+    })
+    await startCameraToStreaming(env, h)
+
+    fireEvent.click(screen.getByText('capture'))
+    await waitFor(() => expect(phaseElement()).toHaveTextContent('qualityRetry'))
+    expect(screen.getByTestId('quality-disposition')).toHaveTextContent('QUALITY_RETRY')
+    expect(screen.getByTestId('retry-guidance')).toHaveTextContent(
+      'Position your face inside the guide.',
+    )
+
+    // Retake returns to streaming with the camera still live.
+    fireEvent.click(screen.getByText('retry-retake'))
+    await waitFor(() => expect(phaseElement()).toHaveTextContent('streaming'))
+
+    // Second capture is acceptable.
+    await captureToPreview()
+    expect(screen.getByTestId('quality-disposition')).toHaveTextContent('QUALITY_READY')
+    expect(screen.getByTestId('preview-img')).toBeInTheDocument()
+  })
+
+  it('routes ANALYSIS_UNAVAILABLE to a quality error with the camera stopped', async () => {
+    const { env, h } = renderHarness({
+      analyzeBundle: async (bundle) => unavailableBundleAssessment(bundle),
+    })
+    const streams = captureStreams(env)
+    await startCameraToStreaming(env, h)
+
+    fireEvent.click(screen.getByText('capture'))
+    await waitFor(() => expect(phaseElement()).toHaveTextContent('error'))
+    expect(screen.getByTestId('error-code')).toHaveTextContent('QUALITY_ANALYSIS_ERROR')
+    // No fabricated approval: the camera stream is released.
+    expect(streams[0].track.stop).toHaveBeenCalled()
+  })
+
+  it('keeps the detector alive across the session and disposes on unmount', async () => {
+    const { env, h, unmount, detector } = renderHarness()
+    await startCameraToStreaming(env, h)
+    await captureToPreview()
+    expect(detector.initializeCalls).toBeGreaterThanOrEqual(1)
+    unmount()
+    expect(detector.disposeCalls).toBeGreaterThanOrEqual(1)
   })
 })

@@ -11,8 +11,13 @@ import { CameraIntroduction } from '../components/CameraIntroduction'
 import { CameraViewport } from '../components/CameraViewport'
 import { CaptureDiagnostics } from '../components/CaptureDiagnostics'
 import { CapturePreview } from '../components/CapturePreview'
+import { QualityChecking } from '../components/QualityChecking'
+import { QualityRetryScreen } from '../components/QualityRetryScreen'
 import { CameraError } from '../media/mediaErrors'
+import { QualityError } from '../quality/errors'
+import { buildLiveGuidance } from '../quality/guidance/guidance'
 import type { CaptureDiagnostics as CaptureDiagnosticsData } from '../types/capture'
+import type { BundleQualityAssessment } from '../quality/types/quality'
 
 function makeVideoRef() {
   return { current: document.createElement('video') }
@@ -131,6 +136,103 @@ describe('CameraErrorState', () => {
     )
     screen.getByRole('button', { name: 'Try again' }).click()
     expect(onRetryStream).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses a quality heading for quality-analysis failures, never a camera message', () => {
+    render(
+      <CameraErrorState
+        error={new QualityError('QUALITY_ANALYSIS_ERROR')}
+        canRetryStream={false}
+        onRetryStream={vi.fn()}
+        onRestart={vi.fn()}
+        onReset={vi.fn()}
+      />,
+    )
+    expect(
+      screen.getByRole('heading', { name: "We couldn't check photo quality." }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('check photo quality')
+  })
+})
+
+describe('QualityChecking', () => {
+  it('shows acquisition-quality progress without model jargon or percentages', () => {
+    render(<QualityChecking />)
+    expect(screen.getByRole('heading', { name: 'Checking photo quality…' })).toBeInTheDocument()
+    expect(screen.queryByText(/%/)).not.toBeInTheDocument()
+  })
+})
+
+describe('QualityRetryScreen', () => {
+  it('shows one prioritized reason and retake/back actions', () => {
+    const onRetake = vi.fn()
+    render(
+      <QualityRetryScreen
+        guidance={buildLiveGuidance('TOO_FAR')}
+        onRetake={onRetake}
+        onReset={vi.fn()}
+      />,
+    )
+    expect(screen.getByRole('heading', { name: 'Photo needs to be retaken.' })).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('Move closer to the camera.')
+    screen.getByRole('button', { name: 'Retake photo' }).click()
+    expect(onRetake).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('CameraViewport guidance', () => {
+  const baseProps = {
+    videoRef: makeVideoRef(),
+    isFrontCamera: true,
+    canSwitchCamera: false,
+    isCapturing: false,
+    isSwitching: false,
+    captureProgress: null,
+    transientMessage: null,
+    onSwitchCamera: vi.fn(),
+    onCapture: vi.fn(),
+  }
+
+  it('shows the guidance message and marks the guide state', () => {
+    const { container } = render(
+      <CameraViewport {...baseProps} guidance={buildLiveGuidance('TOO_FAR')} />,
+    )
+    expect(screen.getByRole('status')).toHaveTextContent('Move closer to the camera.')
+    expect(container.querySelector('.camera-guide__oval--guidance')).not.toBeNull()
+  })
+
+  it('marks the guide ready without relying on color alone', () => {
+    const { container } = render(
+      <CameraViewport {...baseProps} guidance={buildLiveGuidance('READY')} />,
+    )
+    expect(screen.getByRole('status')).toHaveTextContent('Ready to capture.')
+    expect(container.querySelector('.camera-guide__oval--ready')).not.toBeNull()
+  })
+
+  it('shows detector preparation status', () => {
+    render(<CameraViewport {...baseProps} detectorStatus="LOADING" />)
+    expect(screen.getByRole('status')).toHaveTextContent('Preparing quality check…')
+  })
+})
+
+describe('CaptureDiagnostics quality', () => {
+  it('renders quality metrics without image data', () => {
+    const bundle = {
+      captureId: 'c1',
+      captureConfigVersion: 'capture-v1',
+      qualityConfigVersion: 'quality-v1',
+      frames: [],
+      eligibleFrameIds: [],
+      selectedFrameId: 'f1',
+      selectionAlgorithmVersion: 'frame-ranking-v1',
+      disposition: 'QUALITY_READY',
+      reasonCodes: [],
+      totalAnalysisTimeMs: 12,
+    } as unknown as BundleQualityAssessment
+    render(<CaptureDiagnostics diagnostics={null} quality={{ bundle }} />)
+    expect(screen.getByTestId('capture-diagnostics')).toBeInTheDocument()
+    expect(screen.getByText('QUALITY_READY')).toBeInTheDocument()
+    expect(screen.queryByText(/blob:|base64|pixels/i)).not.toBeInTheDocument()
   })
 })
 

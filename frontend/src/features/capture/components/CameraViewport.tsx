@@ -1,15 +1,17 @@
 /**
- * Camera viewport (M2 §12-13, §17, §40-41, §55-59).
+ * Camera viewport (M2 §12-13, §17, §40-41, §55-59 + M3 §64-68).
  *
- * The <video> is rendered here and remains the SAME DOM node from permission-request through
- * capture (the whole viewport is only visually hidden during permission), so the attached stream
- * (srcObject) survives phase transitions. The visual face guide is presentation only; captured
- * pixels are never cropped to it. Front-camera mirroring is a CSS preview transform only —
- * captured pixels keep the camera's natural orientation (M2 §13).
+ * The <video> remains a single stable DOM node (hidden only while permission is requested) so the
+ * attached stream survives phase transitions. The visual face guide reflects live quality state
+ * (neutral/guidance/ready) but never uses color alone; the guidance text is announced via
+ * role="status". The guide is presentation only — captured pixels are never cropped to it, and
+ * front-camera mirroring is a CSS preview transform only.
  */
 
 import type { RefObject } from 'react'
 
+import type { LiveGuidance } from '../quality/guidance/guidance'
+import type { FaceDetectorProviderState } from '../quality/face/FaceDetectorProvider'
 import type { CaptureProgress } from '../hooks/useCaptureFlow'
 
 interface CameraViewportProps {
@@ -20,6 +22,8 @@ interface CameraViewportProps {
   isSwitching: boolean
   captureProgress: CaptureProgress | null
   transientMessage: string | null
+  guidance?: LiveGuidance | null
+  detectorStatus?: FaceDetectorProviderState | null
   /** Visually hide (keep mounted) while permission is requested so the stream can attach. */
   hidden?: boolean
   onSwitchCamera: () => void
@@ -34,6 +38,8 @@ export function CameraViewport({
   isSwitching,
   captureProgress,
   transientMessage,
+  guidance,
+  detectorStatus,
   hidden = false,
   onSwitchCamera,
   onCapture,
@@ -52,9 +58,26 @@ export function CameraViewport({
           playsInline
           data-testid="camera-video"
         />
-        <CameraGuide />
+        <CameraGuide state={guidance?.guideState ?? 'neutral'} />
         {isCapturing && <CaptureProgress progress={captureProgress} />}
       </div>
+
+      {guidance && (
+        <p className="capture-guidance-message" role="status">
+          {guidance.message}
+        </p>
+      )}
+
+      {detectorStatus === 'LOADING' && (
+        <p className="capture-detector-status" role="status">
+          Preparing quality check…
+        </p>
+      )}
+      {detectorStatus === 'ERROR' && (
+        <p className="capture-detector-status" role="status">
+          Quality check is unavailable.
+        </p>
+      )}
 
       {transientMessage && (
         <p className="capture-transient-message" role="status">
@@ -88,10 +111,10 @@ export function CameraViewport({
   )
 }
 
-function CameraGuide() {
+function CameraGuide({ state }: { state: 'neutral' | 'guidance' | 'ready' }) {
   return (
     <div className="camera-guide" aria-hidden="true">
-      <div className="camera-guide__oval" />
+      <div className={`camera-guide__oval camera-guide__oval--${state}`} />
     </div>
   )
 }

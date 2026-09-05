@@ -59,11 +59,22 @@ e2e/            Playwright capture-flow tests (fake camera, Chromium only)
 - Visit `/capture`. The camera is only requested after an explicit **Start camera** action.
 - Passive 8-frame burst (~1.2 s) using `requestVideoFrameCallback` with a `requestAnimationFrame`
   fallback; frames are Blobs (never Base64) and remain in memory only — nothing is uploaded or
-  persisted in M2.
+  persisted in M2/M3.
 - Design and error mapping: `../docs/CAMERA_CAPTURE_DESIGN.md`.
 - Compatibility status (mostly NOT TESTED, honest): `../docs/CAMERA_COMPATIBILITY_MATRIX.md`.
 - Chromium E2E uses a synthetic camera and proves the software flow only; physical-device
   validation is out of scope for CI.
+
+## Quality & face acquisition (M3)
+
+- Live quality guidance (~3 Hz, backpressured) + burst quality analysis with deterministic
+  quality-based frame selection (`frame-ranking-v1`) and quality-retry flow.
+- Pixel metrics and scoring: `../docs/QUALITY_ENGINE_DESIGN.md`; thresholds (all PROVISIONAL):
+  `../docs/QUALITY_CONFIGURATION.md`.
+- Face detection uses MediaPipe behind a `FaceDetectorProvider`. The model/WASM are provisioned
+  locally (not committed): `frontend/scripts/setup-face-assets.sh` + `frontend/model-assets/`.
+- E2E uses a stub face provider (`VITE_FACE_PROVIDER=stub`, test builds only) and a generated
+  synthetic checkerboard camera fixture — no real faces, no model download in CI.
 
 ## Environment variables
 

@@ -68,6 +68,53 @@
   box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.28);
 }
 
+/* Guide states are mirrored in text guidance (never color alone, M3 §68). */
+.camera-guide__oval--guidance {
+  border-color: #ffb300;
+}
+
+.camera-guide__oval--ready {
+  border-color: #4caf50;
+}
+
+.capture-guidance-message {
+  text-align: center;
+  font-weight: 600;
+  margin: 0;
+}
+
+.capture-detector-status {
+  text-align: center;
+  color: #666;
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.quality-checking,
+.quality-retry {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.quality-checking h2,
+.quality-retry h2 {
+  margin: 0;
+}
+
+.quality-retry__reason {
+  margin: 0;
+  font-weight: 600;
+}
+
+.quality-retry__actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
 .capture-progress {
   position: absolute;
   inset: auto 0 0 0;

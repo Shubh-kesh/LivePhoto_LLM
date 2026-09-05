@@ -1,23 +1,27 @@
 /**
- * Frontend capture-flow state machine (M2 §20-22, §52-53).
+ * Frontend capture-flow state machine (M2 §20-22 + M3 §60).
  *
  * Deliberately separate from the M1 backend SessionState — this is the UI capture lifecycle
- * (CaptureFlowState), not the bank session lifecycle. Loose boolean flags (isLoading/hasCamera/
- * isCapturing/hasPhoto) are not used; impossible transitions are prevented by the reducer, which
- * throws on an invalid action for the current phase.
+ * (CaptureFlowState). Loose boolean flags are not used; impossible transitions throw.
  *
- * Valid transitions (M2 §22):
+ * M3 adds: CAPTURING -> ANALYZING -> PREVIEW | QUALITY_RETRY | ERROR; QUALITY_RETRY -> STREAMING.
+ *
+ * Valid transitions:
  *   IDLE --START_CAMERA--> REQUESTING_PERMISSION
  *   REQUESTING_PERMISSION --PERMISSION_OK--> STREAMING | --PERMISSION_ERROR--> ERROR
  *   STREAMING --SWITCH_CAMERA--> SWITCHING_CAMERA --SWITCH_OK|SWITCH_ERROR--> STREAMING
- *   STREAMING --CAPTURE--> CAPTURING --BURST_OK--> PREVIEW | --BURST_ERROR--> ERROR
+ *   STREAMING --CAPTURE--> CAPTURING --BURST_COMPLETE--> ANALYZING
+ *   ANALYZING --ANALYSIS_READY--> PREVIEW | --ANALYSIS_RETRY--> QUALITY_RETRY | --ANALYSIS_ERROR--> ERROR
  *   PREVIEW --RETAKE--> REQUESTING_PERMISSION | --CONFIRM--> CONFIRMED
- *   ERROR --RESUME_STREAM--> STREAMING (camera still active) | --START_CAMERA--> REQUESTING_PERMISSION
+ *   QUALITY_RETRY --RETRY_RETAKE--> STREAMING
+ *   ERROR --RESUME_STREAM--> STREAMING | --START_CAMERA--> REQUESTING_PERMISSION
  *   any --RESET--> IDLE
- *   REQUESTING_PERMISSION|STREAMING|SWITCHING_CAMERA|CAPTURING --INTERRUPTED--> ERROR
+ *   SWITCHING_CAMERA --SWITCH_LOST--> ERROR (camera could not be recovered)
+ *   REQUESTING_PERMISSION|STREAMING|SWITCHING_CAMERA|CAPTURING|ANALYZING|QUALITY_RETRY
+ *       --INTERRUPTED--> ERROR
  */
 
-import type { CameraError } from '../media/mediaErrors'
+import type { FlowError } from '../hooks/flowError'
 
 export type CaptureFlowPhase =
   | 'idle'
@@ -25,30 +29,36 @@ export type CaptureFlowPhase =
   | 'streaming'
   | 'switchingCamera'
   | 'capturing'
+  | 'analyzing'
+  | 'qualityRetry'
   | 'preview'
   | 'confirmed'
   | 'error'
 
 export interface CaptureFlowState {
   phase: CaptureFlowPhase
-  error: CameraError | null
+  error: FlowError | null
 }
 
 export type CaptureFlowAction =
   | { type: 'START_CAMERA' }
   | { type: 'PERMISSION_OK' }
-  | { type: 'PERMISSION_ERROR'; error: CameraError }
+  | { type: 'PERMISSION_ERROR'; error: FlowError }
   | { type: 'SWITCH_CAMERA' }
   | { type: 'SWITCH_OK' }
-  | { type: 'SWITCH_ERROR'; error: CameraError }
+  | { type: 'SWITCH_ERROR'; error: FlowError }
+  | { type: 'SWITCH_LOST'; error: FlowError }
   | { type: 'CAPTURE' }
-  | { type: 'BURST_OK' }
-  | { type: 'BURST_ERROR'; error: CameraError }
+  | { type: 'BURST_COMPLETE' }
+  | { type: 'ANALYSIS_READY' }
+  | { type: 'ANALYSIS_RETRY' }
+  | { type: 'ANALYSIS_ERROR'; error: FlowError }
+  | { type: 'RETRY_RETAKE' }
   | { type: 'RETAKE' }
   | { type: 'CONFIRM' }
   | { type: 'RESUME_STREAM' }
   | { type: 'RESET' }
-  | { type: 'INTERRUPTED'; error: CameraError }
+  | { type: 'INTERRUPTED'; error: FlowError }
 
 export const initialCaptureFlowState: CaptureFlowState = { phase: 'idle', error: null }
 
@@ -59,9 +69,13 @@ const ALLOWED_FROM: Record<CaptureFlowAction['type'], readonly CaptureFlowPhase[
   SWITCH_CAMERA: ['streaming'],
   SWITCH_OK: ['switchingCamera'],
   SWITCH_ERROR: ['switchingCamera'],
+  SWITCH_LOST: ['switchingCamera'],
   CAPTURE: ['streaming'],
-  BURST_OK: ['capturing'],
-  BURST_ERROR: ['capturing'],
+  BURST_COMPLETE: ['capturing'],
+  ANALYSIS_READY: ['analyzing'],
+  ANALYSIS_RETRY: ['analyzing'],
+  ANALYSIS_ERROR: ['capturing', 'analyzing'],
+  RETRY_RETAKE: ['qualityRetry'],
   RETAKE: ['preview'],
   CONFIRM: ['preview'],
   RESUME_STREAM: ['error'],
@@ -71,11 +85,20 @@ const ALLOWED_FROM: Record<CaptureFlowAction['type'], readonly CaptureFlowPhase[
     'streaming',
     'switchingCamera',
     'capturing',
+    'analyzing',
+    'qualityRetry',
     'preview',
     'confirmed',
     'error',
   ],
-  INTERRUPTED: ['requestingPermission', 'streaming', 'switchingCamera', 'capturing'],
+  INTERRUPTED: [
+    'requestingPermission',
+    'streaming',
+    'switchingCamera',
+    'capturing',
+    'analyzing',
+    'qualityRetry',
+  ],
 }
 
 export function captureFlowReducer(
@@ -91,29 +114,35 @@ export function captureFlowReducer(
     case 'START_CAMERA':
     case 'RETAKE':
       return { phase: 'requestingPermission', error: null }
-    case 'PERMISSION_OK':
-      return { phase: 'streaming', error: null }
-    case 'PERMISSION_ERROR':
-      return { phase: 'error', error: action.error }
     case 'SWITCH_CAMERA':
       return { phase: 'switchingCamera', error: null }
+    case 'PERMISSION_OK':
     case 'SWITCH_OK':
+      return { phase: 'streaming', error: null }
+    case 'PERMISSION_ERROR':
+    case 'SWITCH_LOST':
+    case 'ANALYSIS_ERROR':
+    case 'INTERRUPTED':
+      return { phase: 'error', error: action.error }
     case 'SWITCH_ERROR':
-      // On switch failure the current camera remains active (M2 §17).
+      // On switch failure the previous camera was recovered (M2 §17 / M3 §76).
       return { phase: 'streaming', error: null }
     case 'CAPTURE':
       return { phase: 'capturing', error: null }
-    case 'BURST_OK':
+    case 'BURST_COMPLETE':
+      return { phase: 'analyzing', error: null }
+    case 'ANALYSIS_READY':
       return { phase: 'preview', error: null }
-    case 'BURST_ERROR':
-      return { phase: 'error', error: action.error }
+    case 'ANALYSIS_RETRY':
+      return { phase: 'qualityRetry', error: null }
+    case 'RETRY_RETAKE':
+      return { phase: 'streaming', error: null }
     case 'CONFIRM':
       return { phase: 'confirmed', error: null }
     case 'RESUME_STREAM':
       return { phase: 'streaming', error: null }
     case 'RESET':
       return { phase: 'idle', error: null }
-    case 'INTERRUPTED':
-      return { phase: 'error', error: action.error }
   }
+  return state
 }

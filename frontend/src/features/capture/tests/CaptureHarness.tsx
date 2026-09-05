@@ -1,18 +1,26 @@
 /**
  * Test harness for the capture flow: renders a real <video> element wired to useCaptureFlow plus
- * buttons that drive the flow, and exposes phase/error/preview as data-testid spans. Used by
- * flow tests; the CapturePage integration test exercises the real components.
+ * buttons that drive the flow, and exposes phase/error/preview as data-testid spans. Tests inject
+ * a deterministic face detector and bundle analyzer (M3 §100-102).
  */
 
 import { useCaptureFlow } from '../hooks/useCaptureFlow'
+import type { FaceDetectorProvider } from '../quality/face/FaceDetectorProvider'
+import type { BundleQualityAssessment } from '../quality/types/quality'
 import type { CaptureBundle } from '../types/capture'
 
-export function CaptureHarness({
-  onBundleReady,
-}: {
+interface CaptureHarnessProps {
+  faceDetector?: FaceDetectorProvider
+  analyzeBundle?: (bundle: CaptureBundle) => Promise<BundleQualityAssessment>
   onBundleReady?: (bundle: CaptureBundle) => void
-}) {
-  const flow = useCaptureFlow({ onBundleReady })
+}
+
+export function CaptureHarness({
+  faceDetector,
+  analyzeBundle,
+  onBundleReady,
+}: CaptureHarnessProps) {
+  const flow = useCaptureFlow({ onBundleReady, faceDetector, analyzeBundle })
 
   const button = (label: string, action: () => void) => (
     <button type="button" onClick={() => void action()}>
@@ -27,6 +35,7 @@ export function CaptureHarness({
       {button('switch', flow.switchCamera)}
       {button('capture', flow.capture)}
       {button('retake', flow.retake)}
+      {button('retry-retake', flow.retryRetake)}
       {button('confirm', flow.confirm)}
       {button('resume', flow.resumeStream)}
       {button('reset', flow.reset)}
@@ -34,6 +43,12 @@ export function CaptureHarness({
       <span data-testid="can-switch">{String(flow.canSwitchCamera)}</span>
       <span data-testid="retake-count">{flow.retakeCount}</span>
       <span data-testid="bundle-frames">{flow.bundle ? flow.bundle.frames.length : 'none'}</span>
+      <span data-testid="detector-state">{flow.detectorState}</span>
+      <span data-testid="quality-disposition">
+        {flow.qualityAssessment ? flow.qualityAssessment.disposition : 'none'}
+      </span>
+      {flow.retryGuidance && <span data-testid="retry-guidance">{flow.retryGuidance.message}</span>}
+      {flow.liveGuidance && <span data-testid="live-guidance">{flow.liveGuidance.message}</span>}
       {flow.previewUrl && <img data-testid="preview-img" src={flow.previewUrl} alt="preview" />}
       {flow.error && <span data-testid="error-code">{flow.error.code}</span>}
       {flow.error && <span data-testid="error-message">{flow.error.safeMessage}</span>}

@@ -8,6 +8,16 @@ import { describe, expect, it } from 'vitest'
 
 import { CapturePage } from '../CapturePage'
 import { setupMediaEnvironment, type MediaEnvironment } from './mediaFakes'
+import { FakeFaceDetector, readyBundleAssessment } from './qualityFakes'
+
+function renderCapturePage() {
+  return render(
+    <CapturePage
+      faceDetector={new FakeFaceDetector()}
+      analyzeBundle={(b) => Promise.resolve(readyBundleAssessment(b))}
+    />,
+  )
+}
 
 function videoElement(): HTMLVideoElement {
   return screen.getByTestId('camera-video') as HTMLVideoElement
@@ -31,7 +41,7 @@ describe('CapturePage', () => {
   it('runs start -> capture -> preview -> retake -> capture -> confirm', async () => {
     const env = setupMediaEnvironment()
 
-    render(<CapturePage />)
+    renderCapturePage()
     expect(
       screen.getByRole('heading', { name: 'We need access to your camera' }),
     ).toBeInTheDocument()
@@ -82,7 +92,7 @@ describe('CapturePage', () => {
   it('shows a safe error and allows restart when permission is denied', async () => {
     const env = setupMediaEnvironment()
     env.mediaDevices.getUserMedia.mockRejectedValue(new DOMException('denied', 'NotAllowedError'))
-    render(<CapturePage />)
+    renderCapturePage()
     fireEvent.click(screen.getByRole('button', { name: 'Start camera' }))
     await waitFor(() =>
       expect(
