@@ -21,6 +21,10 @@ describe('HomePage', () => {
     renderWithProviders(<HomePage />)
     expect(screen.getByRole('heading', { name: 'LivePhoto' })).toBeInTheDocument()
     expect(screen.getByText('Secure passive liveness platform')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Go to camera capture' })).toHaveAttribute(
+      'href',
+      '/capture',
+    )
   })
 
   it('renders application info when available', async () => {

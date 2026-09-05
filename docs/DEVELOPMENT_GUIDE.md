@@ -44,8 +44,15 @@ docs/             M0 architecture baseline + this guide
   `backend/tests/contract/`, DB-touching integration tests (later) in `backend/tests/integration/`.
   Unit tests must require **no external network and no MSSQL**. DB integration tests use
   `TEST_DATABASE_URL` and are skipped with a clear reason when no integration database exists.
-- **Frontend (Vitest + Testing Library + jsdom):** tests live next to what they test under
-  `src/test/`. No camera mocking in M1.
+- **Frontend (Vitest + Testing Library + jsdom):** unit/component tests live in `src/test/` and in
+  `src/features/*/tests/`. The capture feature's fake media layer
+  (`src/features/capture/tests/mediaFakes.ts`) supplies synthetic MediaDevices/streams/video/
+  canvas/object-URLs — no camera required, and reusable for M3.
+- **Browser E2E (Playwright, Chromium only):** `frontend/e2e/` drives the capture flow with a
+  synthetic camera (`--use-fake-ui-for-media-stream --use-fake-device-for-media-stream`).
+  Run `npm run test:e2e` from `frontend/`. Chromium E2E proves the software flow only; physical
+  device/browser validation is tracked in `docs/CAMERA_COMPATIBILITY_MATRIX.md` and must never be
+  claimed from the synthetic run.
 - Coverage floor: backend `>= 80%` (`pyproject.toml` `[tool.coverage.report] fail_under`).
 
 ## 6. Linting / formatting / type checking
@@ -114,12 +121,24 @@ docs/             M0 architecture baseline + this guide
    `api/`, schemas in `schemas/`, hooks in `hooks/`.
 2. Define the Zod schema (mirroring the backend Pydantic contract) and infer the TS type from it;
    do not hand-duplicate the type.
-3. Add a route in `app/App.tsx` and a page in `pages/`.
-4. Add tests in `src/test/`.
+3. Add a route in `app/App.tsx` and a page in `pages/` (or in the feature).
+4. Add tests in `src/test/` or `src/features/<name>/tests/`; for camera features reuse the fake
+   media layer.
 5. Run: `npm run lint`, `npm run format:check`, `npm run typecheck`, `npm run test:run`,
-   `npm run build`.
+   `npm run build`. For camera flows also run `npm run test:e2e` (Chromium synthetic camera).
 
-## 13. Session-state contract (M1)
+## 13. Camera capture conventions (M2)
+
+- Camera APIs are infrastructure: all `getUserMedia`/`MediaStream` calls live in
+  `features/capture/media/`; React components never call mediaDevices directly.
+- The `<video>` element must remain a single stable DOM node across the permission→streaming
+  transition so `srcObject` survives.
+- Never log/persist raw device identifiers (`deviceId`, `groupId`), frame blobs, or Base64.
+- Mirror the preview with CSS only; never mirror captured pixels.
+- Capture the complete frame; never crop to the face guide.
+- Pair every `URL.createObjectURL` with `URL.revokeObjectURL`.
+
+## 14. Session-state contract (M1)
 
 `backend/app/domain/session.py` defines `SessionState` (lifecycle) separate from
 `DecisionOutcome` (liveness decision). Conceptual transitions (implemented in a later milestone):

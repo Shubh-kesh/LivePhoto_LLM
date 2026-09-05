@@ -34,6 +34,7 @@ npm run format       # Prettier write
 npm run typecheck    # tsc --noEmit
 npm run test         # vitest (watch)
 npm run test:run     # vitest (single run)
+npm run test:e2e     # Playwright Chromium E2E with a synthetic (fake) camera
 ```
 
 ## Project boundaries
@@ -42,23 +43,30 @@ npm run test:run     # vitest (single run)
 src/
 ├── app/        application shell: routes, providers, error boundary, query client
 ├── pages/      route-level pages (Home/Foundation, NotFound)
-├── components/ shared components (empty in M1)
-├── features/   feature-oriented code (capture/result/review — future milestones)
+├── features/   feature-oriented code (capture/)
+│   └── capture/ M2 secure camera capture: components, hooks, media, state, config, types, utils
 ├── api/        typed HTTP transport/client layer
 ├── hooks/      shared hooks
 ├── lib/        small reusable infrastructure (env)
 ├── schemas/    Zod runtime validation (mirrors backend Pydantic contracts)
 ├── types/      compile-time types not backed by schemas
 └── test/       test setup and utilities
+e2e/            Playwright capture-flow tests (fake camera, Chromium only)
 ```
+
+## Camera capture (M2)
+
+- Visit `/capture`. The camera is only requested after an explicit **Start camera** action.
+- Passive 8-frame burst (~1.2 s) using `requestVideoFrameCallback` with a `requestAnimationFrame`
+  fallback; frames are Blobs (never Base64) and remain in memory only — nothing is uploaded or
+  persisted in M2.
+- Design and error mapping: `../docs/CAMERA_CAPTURE_DESIGN.md`.
+- Compatibility status (mostly NOT TESTED, honest): `../docs/CAMERA_COMPATIBILITY_MATRIX.md`.
+- Chromium E2E uses a synthetic camera and proves the software flow only; physical-device
+  validation is out of scope for CI.
 
 ## Environment variables
 
 Only frontend-safe values may use `VITE_*` (see `frontend/.env.example`). Never place AI keys,
 database passwords, bank secrets or service credentials in frontend environment variables — they
 are exposed to any user of the browser.
-
-## Camera note
-
-No camera functionality is implemented in M1 and no camera permission is requested. Camera capture
-arrives in M2 (`docs/ROADMAP.md`).

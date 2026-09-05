@@ -1,8 +1,8 @@
 # LivePhoto — Roadmap (M0 Baseline, updated for M1)
 
-Status: **M0 COMPLETE, M1 COMPLETE.** M2+ are planned and are **not implemented** in M1. Each
-milestone: goal / scope / non-scope / dependencies / deliverables / acceptance criteria / major
-risks.
+Status: **M0 COMPLETE, M1 COMPLETE, M2 COMPLETE.** M3+ are planned and are **not implemented** in
+M2. Each milestone: goal / scope / non-scope / dependencies / deliverables / acceptance criteria /
+major risks.
 
 Dependencies and acceptance criteria reference the design docs in this repository. Milestones may
 be re-sequenced as evaluation results (M4–M9) dictate.
@@ -37,15 +37,21 @@ be re-sequenced as evaluation results (M4–M9) dictate.
 - **Major risks:** Contract drift vs M0; premature microservices (guarded by P14).
 
 ## M2 — Secure Camera Capture
-- **Goal:** Secure, browser-based burst capture that only submits server-validated frames.
-- **Scope:** Camera permission + secure context; burst capture (configurable frames/duration);
-  client-side UX screening (non-authoritative); opaque session token flow; upload with
-  server-side image validation; no gallery upload.
-- **Non-scope:** Liveness decisions; PAD; redirect/result delivery to bank.
+- **Status: COMPLETE.**
+- **Goal:** Secure, browser-based burst camera acquisition that feeds later quality/liveness
+  engines. No liveness detection is performed.
+- **Scope:** Secure-context/API checks; explicit permission UX; conservative getUserMedia
+  constraints; front/rear switching; live preview with presentation-only mirroring; passive 8-frame
+  burst (~1.2 s) with requestVideoFrameCallback + tested rAF fallback; Blob frames; representative
+  preview; retake/use-photo; capture-flow state machine; error taxonomy; stream/object-URL cleanup;
+  background handling; responsive/accessible UI; unit tests + Playwright fake-camera E2E.
+- **Non-scope:** Liveness decisions; PAD; upload endpoints; bank session/token flow; backend capture
+  API; persistence; gallery upload; image quality scoring (M3).
 - **Dependencies:** M1.
-- **Deliverables:** Capture UI; capture API; session/token handling.
-- **Acceptance criteria:** Burst captured config-bounded; uploads server-validated; no PII in
-  URLs; permission denied paths handled.
+- **Deliverables:** Capture feature (`frontend/src/features/capture/`); fake media test layer;
+  Playwright fake-camera E2E; `docs/CAMERA_CAPTURE_DESIGN.md`; `docs/CAMERA_COMPATIBILITY_MATRIX.md`.
+- **Acceptance criteria:** No image leaves the browser; no microphone requested; no Base64; no
+  persistence; all frontend checks + backend regression green; E2E passes on synthetic camera.
 - **Major risks:** Browser/WebView camera quirks; secure-context on mobile.
 
 ## M3 — Image Quality Engine

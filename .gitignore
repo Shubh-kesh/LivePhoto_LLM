@@ -38,6 +38,10 @@ node_modules/
 frontend/dist/
 frontend/coverage/
 npm-debug.log*
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+frontend/playwright/.cache/
 
 # ---- ML / data (never commit biometric or customer data) ---------------------
 ml/datasets/*
