@@ -73,3 +73,36 @@ async def test_live_provider_structured_evaluation() -> None:
         f"image_count={result.image_count} classification={result.classification} "
         f"latency_ms={result.latency_ms}"
     )
+
+
+@pytest.mark.skipif(
+    os.getenv("VLM_LIVE_TESTS_ENABLED") != "true", reason="VLM_LIVE_TESTS_ENABLED not set"
+)
+@pytest.mark.anyio
+async def test_live_provider_triad_evaluation() -> None:
+    provider = os.getenv("VLM_PROVIDER", "")
+    if not _provider_keyed():
+        pytest.skip(f"provider '{provider}' not fully configured")
+
+    settings = Settings()
+    service = VlmEvaluationService(settings)
+    request = ExperimentEvaluateRequest(
+        strategy="temporal-triad-v1",
+        capture_config_version="capture-v1",
+        quality_config_version="quality-v1",
+        frame_selection_version="temporal-triad-v1",
+        provider=provider,
+        frames=[
+            ImageInput(bytes=_jpeg_bytes(), mime_type="image/jpeg", sequence=0),
+            ImageInput(bytes=_jpeg_bytes(), mime_type="image/jpeg", sequence=1),
+            ImageInput(bytes=_jpeg_bytes(), mime_type="image/jpeg", sequence=2),
+        ],
+    )
+    result = await service.evaluate(request)
+    assert result.error is None, f"provider error: {result.error}"
+    assert result.image_count == 3
+    print(
+        f"LIVE_PROVIDER_TRIAD_RESULT provider={result.provider} model={result.model} "
+        f"image_count={result.image_count} classification={result.classification} "
+        f"latency_ms={result.latency_ms}"
+    )

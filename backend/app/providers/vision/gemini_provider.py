@@ -54,7 +54,25 @@ ASSESSMENT_JSON_SCHEMA = {
         "self_reported_confidence": {"type": "number"},
         "evidence_codes": {
             "type": "array",
-            "items": {"type": "string"},
+            "items": {
+                "type": "string",
+                "enum": [
+                    "DEVICE_BORDER_VISIBLE",
+                    "SCREEN_EDGE_VISIBLE",
+                    "DISPLAY_REFLECTION",
+                    "MOIRE_PATTERN",
+                    "PIXEL_GRID_PATTERN",
+                    "DISPLAY_GLARE",
+                    "PAPER_EDGE_VISIBLE",
+                    "PAPER_TEXTURE",
+                    "PRINT_HALFTONE_PATTERN",
+                    "FLAT_PRINT_APPEARANCE",
+                    "ENVIRONMENT_CONSISTENT_WITH_LIVE",
+                    "NATURAL_SCENE_DEPTH_CUES",
+                    "INSUFFICIENT_VISUAL_EVIDENCE",
+                    "NONE",
+                ],
+            },
         },
     },
     "required": [

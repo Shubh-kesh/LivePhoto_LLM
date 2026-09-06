@@ -165,6 +165,6 @@ class VlmEvaluationService:
             classification=assessment.classification.value,
             attack_medium=assessment.attack_medium.value,
             self_reported_confidence=assessment.self_reported_confidence,
-            evidence_codes=[code.value for code in assessment.evidence_codes],
+            evidence_codes=list(assessment.evidence_codes),
             latency_ms=int(duration * 1000),
         )

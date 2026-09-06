@@ -33,6 +33,18 @@ class DatasetSample(BaseModel):
     environment: str | None = None
     split: Literal["dev", "holdout"] | None = None
 
+    # M5 traceability (M4 §21): preserve original dataset/source label for every row.
+    source_dataset: str | None = None
+    source_sample_id: str | None = None
+    source_label: str | None = None
+    canonical_label: GroundTruthLabel | None = None
+    subject_alias: str | None = None
+    capture_device_class: str | None = None
+    presentation_device_class: str | None = None
+    presentation_border_visible: bool | None = None
+    lighting: str | None = None
+    prompt_injection: bool = False
+
 
 def load_manifest(path: str | Path) -> list[DatasetSample]:
     """Load a JSONL manifest; frame paths are resolved relative to the manifest directory."""

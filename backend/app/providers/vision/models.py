@@ -51,7 +51,14 @@ class EvidenceCode(StrEnum):
 
 
 class VlmAssessment(BaseModel):
-    """Strict structured provider output (M4 §36, §52, §129). Extra fields are forbidden."""
+    """Strict structured provider output (M4 §36, §52, §129). Extra fields are forbidden.
+
+    ``classification`` and ``attack_medium`` are strict enums; ``evidence_codes`` are retained as
+    bounded strings because real providers emit codes beyond the controlled ``EvidenceCode``
+    vocabulary. Known codes map to the documented enum; unknown codes are kept as observations and
+    never treated as ground truth (M4 §38). A wrong evidence code does not invalidate an otherwise
+    valid classification.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -59,7 +66,7 @@ class VlmAssessment(BaseModel):
     classification: VlmClassification
     attack_medium: AttackMedium = AttackMedium.NONE
     self_reported_confidence: float = Field(ge=0.0, le=1.0)
-    evidence_codes: list[EvidenceCode] = Field(default_factory=list)
+    evidence_codes: list[str] = Field(default_factory=list, max_length=20)
 
 
 class TokenUsage(BaseModel):

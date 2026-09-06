@@ -41,3 +41,14 @@ tested on that environment.** The developer/user populates results after manual 
 - Camera permission, preview mirroring, capture, quality evaluation and background-recovery
   behaviour are verified per environment only with a real device/camera.
 - WebView rows depend on the embedding bank application's permission handling.
+
+## M5 update
+
+- **M4/M5 correction:** the earlier synthetic-camera E2E unintentionally fell back to the machine's
+  real webcam because `--use-file-for-fake-video-capture` requires `--use-fake-device-for-media-stream`
+  to be present. Both flags are now set and the E2E uses a deterministic generated noise fixture.
+- **M5 real-provider smoke:** the configured Gemini provider (`gemini-3.8-flash`) returned valid
+  structured output on 1-frame and 3-frame synthetic inputs (see `docs/M5_VLM_BASELINE_RESULTS.md`).
+  This proves integration, not device or accuracy behaviour.
+- Laptop/mobile device rows remain **NOT TESTED** (physical-device testing not performed in this
+  environment).

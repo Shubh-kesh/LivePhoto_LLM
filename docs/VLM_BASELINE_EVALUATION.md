@@ -80,3 +80,39 @@ reported as *100% on this finite evaluation set only* (M4 §158).
 
 Meaningful accuracy conclusions require: real MediaPipe model exercised, one laptop camera and one
 mobile camera manually verified, and a genuine/spoof POC dataset evaluated (M4 §174).
+
+## M5 additions
+
+- **Runner guards (M5 §41-43):** `--dry-run` (no external calls), `--live`
+  (`--confirm-external-provider`) required for real providers, `--max-requests` required budget.
+- **Run metadata (M5 §74-75):** run_id, git commit SHA, dirty-tree flag, dataset name + manifest
+  SHA-256, provider, exact model, prompt id/version, schema version, strategy, sampling version,
+  frame-extraction version, started/completed times. Do not change code mid-holdout.
+- **Two tracks (M5 §46):** `PUBLIC DATASET VLM BASELINE` vs `LIVEPHOTO NATIVE CAPTURE BASELINE`;
+  never merged blindly.
+- **Confidence intervals (M5 §53):** experimental APCER-style estimate per attack class plus Wilson
+  95% CI; 0/25 is reported as "0 observed false accepts among 25 samples" with its interval, never
+  "real-world 0%".
+- **BPCER-style + genuine non-accept (M5 §56-57):** UNCERTAIN/QUALITY_FAILURE count as "not LIVE";
+  technical errors reported separately.
+- **Provider reliability (M5 §58):** successful/timeouts/429/auth/schema/other, never counted as
+  model error.
+- **Confidence analysis (M5 §60-62):** buckets include spoof→LIVE; `high_confidence_errors.jsonl`
+  for wrong predictions at ≥0.8 (exploratory only; no confidence→PASS rule).
+- **Paired strategy comparison (M5 §63):** single vs triad on the same samples (both-correct,
+  single-only, triad-only, both-wrong; spoof→LIVE per strategy).
+- **Repeatability (M5 §64):** small subset × N runs (`--repetitions`) → agreement/confidence range.
+- **Prompt injection (M5 §65-66):** samples flagged `prompt_injection=true` reported separately.
+- **Border-visibility analysis (M5 §67-69):** compare border-visible vs hidden when metadata allows.
+- **Outputs (M5 §77):** `baseline_report.json/.md`, `confusion_matrix.csv`,
+  `high_confidence_errors.jsonl`, `repeatability_results.jsonl`, `prompt_injection_results.jsonl`,
+  `strategy_comparison.json`, `provider_comparison.json`, `m6_priority_analysis.md`. No images.
+- **Statistical honesty (M5 §88-90):** every percentage carries numerator/denominator; `N < 100`
+  flagged SMALL POC SAMPLE; zero errors → "no errors in this finite set", never "100% real-world".
+
+## M5 status
+
+Real Gemini smoke executed (single + triad, structured output valid, ~2.6-2.9 s). Accuracy baseline
+**NOT MEASURED** — the public-dataset gate is BLOCKED (no legally-cleared dataset for external-VLM
+use); physical device gates NOT COMPLETE. See `docs/M5_DATASET_BOOTSTRAP.md` and
+`docs/M5_VLM_BASELINE_RESULTS.md`.

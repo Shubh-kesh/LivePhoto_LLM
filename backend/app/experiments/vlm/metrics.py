@@ -17,6 +17,18 @@ from pydantic import BaseModel
 from app.experiments.vlm.manifest import DatasetSample
 from app.providers.vision import VlmClassification, VlmErrorCode
 
+
+def wilson_interval(k: int, n: int, z: float = 1.96) -> tuple[float, float] | None:
+    """Wilson 95% score interval for a proportion k/n (M5 §53)."""
+    if n <= 0:
+        return None
+    p = k / n
+    denominator = 1 + z * z / n
+    centre = (p + z * z / (2 * n)) / denominator
+    margin = z * math.sqrt((p * (1 - p) + z * z / (4 * n)) / n) / denominator
+    return (round(max(0.0, centre - margin), 4), round(min(1.0, centre + margin), 4))
+
+
 LABEL_TO_CLASSIFICATION: dict[str, VlmClassification] = {
     "LIVE": VlmClassification.LIVE,
     "SCREEN_MOBILE": VlmClassification.SCREEN_REPLAY,
@@ -41,6 +53,7 @@ class ResultRecord(BaseModel):
     self_reported_confidence: float | None = None
     latency_ms: int | None = None
     error: str | None = None
+    repetition: int | None = None
 
 
 def classify_for(label: str) -> VlmClassification:
@@ -73,10 +86,11 @@ def _percentile(values: list[float], percentile: float) -> float:
 
 def latency_stats(values: list[float]) -> dict[str, float]:
     if not values:
-        return {"mean": 0.0, "median": 0.0, "p95": 0.0, "max": 0.0}
+        return {"mean": 0.0, "median": 0.0, "p90": 0.0, "p95": 0.0, "max": 0.0}
     return {
         "mean": round(statistics.mean(values), 1),
         "median": round(statistics.median(values), 1),
+        "p90": round(_percentile(values, 0.90), 1),
         "p95": round(_percentile(values, 0.95), 1),
         "max": round(max(values), 1),
     }
@@ -90,15 +104,23 @@ def _class_row(label: str, records: list[ResultRecord]) -> dict[str, Any]:
     spoof_to_live = sum(
         1 for r in records if label != "LIVE" and r.predicted == VlmClassification.LIVE.value
     )
-    return {
+    row: dict[str, Any] = {
         "class": label,
         "n": n,
         "correct": correct,
         "uncertain": uncertain,
         "error": errors,
         "spoof_to_live": spoof_to_live,
-        "apcer_style_estimate": round(spoof_to_live / n, 4) if n and label != "LIVE" else None,
     }
+    if label != "LIVE" and n:
+        # Every percentage carries numerator/denominator (M5 §88).
+        row["apcer_style_estimate"] = {
+            "numerator": spoof_to_live,
+            "denominator": n,
+            "value": round(spoof_to_live / n, 4),
+        }
+        row["apcer_style_wilson_ci"] = wilson_interval(spoof_to_live, n)
+    return row
 
 
 def compute_metrics(
@@ -127,11 +149,14 @@ def compute_metrics(
     uncertain = sum(1 for r in records if is_uncertain(r))
     errors = sum(1 for r in records if is_error(r))
 
-    # BPCER-style: genuine samples not accepted as LIVE over genuine samples.
-    # Treatment of uncertain/quality-failure/errors: they count as "not accepted as LIVE" (M4 §96).
+    # BPCER-style: genuine samples not accepted as LIVE over genuine samples (M5 §57).
+    # UNCERTAIN / QUALITY_FAILURE count as "not accepted as LIVE"; technical errors are reported
+    # separately (M5 §56-57).
     bpcer_style = None
+    genuine_non_accept = 0
     if live_total:
-        bpcer_style = round((live_total - live_accept) / live_total, 4)
+        genuine_non_accept = live_total - live_accept
+        bpcer_style = round(genuine_non_accept / live_total, 4)
 
     latencies = [r.latency_ms for r in records if r.latency_ms is not None]
 
@@ -140,10 +165,19 @@ def compute_metrics(
         "class_rows": class_rows,
         "spoof_to_live_total": spoof_accepted_as_live,
         "spoof_total": spoof_total,
-        "apcer_style_overall": round(spoof_accepted_as_live / spoof_total, 4)
-        if spoof_total
-        else None,
+        "apcer_style_overall": {
+            "numerator": spoof_accepted_as_live,
+            "denominator": spoof_total,
+            "value": round(spoof_accepted_as_live / spoof_total, 4) if spoof_total else None,
+        },
+        "apcer_style_overall_wilson_ci": wilson_interval(spoof_accepted_as_live, spoof_total),
         "bpcer_style": bpcer_style,
+        "bpcer_style_wilson_ci": wilson_interval(genuine_non_accept, live_total),
+        "genuine_non_accept_rate": {
+            "numerator": genuine_non_accept,
+            "denominator": live_total,
+            "value": bpcer_style,
+        },
         "live_precision": round(
             live_accept
             / max(1, sum(1 for r in records if r.predicted == VlmClassification.LIVE.value)),
@@ -175,8 +209,102 @@ def _confidence_buckets(records: list[ResultRecord]) -> dict[str, dict[str, int]
                 for r in bucket_records
                 if not is_correct(r) and not is_uncertain(r) and not is_error(r)
             ),
+            "spoof_to_live": sum(
+                1
+                for r in bucket_records
+                if classify_for(r.ground_truth) != VlmClassification.LIVE
+                and r.predicted == VlmClassification.LIVE.value
+            ),
         }
     return buckets
+
+
+def high_confidence_errors(
+    records: list[ResultRecord], threshold: float = 0.8
+) -> list[dict[str, Any]]:
+    """Wrong classifications at self_reported_confidence >= threshold (M5 §61).
+
+    This is an exploratory analysis threshold, not a business rule.
+    """
+    rows = []
+    for record in records:
+        if (
+            record.self_reported_confidence is not None
+            and record.self_reported_confidence >= threshold
+            and not is_uncertain(record)
+            and not is_error(record)
+            and not is_correct(record)
+        ):
+            rows.append(record.model_dump())
+    return rows
+
+
+def provider_reliability(records: list[ResultRecord]) -> dict[str, Any]:
+    successful = sum(1 for r in records if not is_error(r))
+    errors = error_counts(records)
+    return {
+        "successful_requests": successful,
+        "total_requests": len(records),
+        "timeouts": errors.get("PROVIDER_TIMEOUT", 0),
+        "rate_limited": errors.get("PROVIDER_RATE_LIMITED", 0),
+        "auth_errors": errors.get("PROVIDER_AUTH_ERROR", 0),
+        "schema_failures": errors.get("SCHEMA_VALIDATION_ERROR", 0),
+        "other_provider_errors": {
+            code: count
+            for code, count in errors.items()
+            if code
+            not in (
+                "PROVIDER_TIMEOUT",
+                "PROVIDER_RATE_LIMITED",
+                "PROVIDER_AUTH_ERROR",
+                "SCHEMA_VALIDATION_ERROR",
+            )
+        },
+    }
+
+
+def paired_strategy_comparison(records: list[ResultRecord]) -> dict[str, Any]:
+    """Compare single-quality-v1 vs temporal-triad-v1 on the SAME samples (M5 §63)."""
+    by_sample: dict[tuple[str, str, str], dict[str, ResultRecord]] = defaultdict(dict)
+    for record in records:
+        by_sample[(record.sample_id, record.provider, record.model)][record.frame_strategy] = record
+
+    counts = {
+        "both_correct": 0,
+        "single_correct_triad_wrong": 0,
+        "single_wrong_triad_correct": 0,
+        "both_wrong": 0,
+        "not_paired": 0,
+    }
+    paired_spoof_to_live: dict[str, int] = {"single": 0, "triad": 0}
+    for by_strategy in by_sample.values():
+        single = by_strategy.get("single-quality-v1")
+        triad = by_strategy.get("temporal-triad-v1")
+        if single is None or triad is None:
+            counts["not_paired"] += 1
+            continue
+        s_ok = is_correct(single)
+        t_ok = is_correct(triad)
+        if s_ok and t_ok:
+            counts["both_correct"] += 1
+        elif s_ok and not t_ok:
+            counts["single_correct_triad_wrong"] += 1
+        elif not s_ok and t_ok:
+            counts["single_wrong_triad_correct"] += 1
+        else:
+            counts["both_wrong"] += 1
+        if (
+            classify_for(single.ground_truth) != VlmClassification.LIVE
+            and single.predicted == VlmClassification.LIVE.value
+        ):
+            paired_spoof_to_live["single"] += 1
+        if (
+            classify_for(triad.ground_truth) != VlmClassification.LIVE
+            and triad.predicted == VlmClassification.LIVE.value
+        ):
+            paired_spoof_to_live["triad"] += 1
+
+    return {"counts": counts, "paired_spoof_to_live": paired_spoof_to_live}
 
 
 def group_by_strategy(records: list[ResultRecord]) -> dict[str, dict[str, Any]]:

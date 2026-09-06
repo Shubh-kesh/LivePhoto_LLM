@@ -9,6 +9,7 @@ from app.experiments.vlm.metrics import (
     group_by_provider,
     group_by_strategy,
     is_correct,
+    wilson_interval,
 )
 
 
@@ -56,9 +57,28 @@ def test_apcer_style_and_bpcer_style() -> None:
     # spoof->LIVE: 2 of 4 attack samples.
     assert metrics["spoof_to_live_total"] == 2
     assert metrics["spoof_total"] == 4
-    assert metrics["apcer_style_overall"] == 0.5
+    overall = metrics["apcer_style_overall"]
+    assert overall["numerator"] == 2
+    assert overall["denominator"] == 4
+    assert overall["value"] == 0.5
     # BPCER-style: 1 of 3 genuine not accepted as LIVE.
     assert metrics["bpcer_style"] == round(1 / 3, 4)
+    assert metrics["bpcer_style_wilson_ci"] is not None
+    assert metrics["genuine_non_accept_rate"]["numerator"] == 1
+
+
+def test_wilson_interval() -> None:
+    # 0/25 -> upper bound is small but nonzero (M5 §54).
+    ci = wilson_interval(0, 25)
+    assert ci is not None
+    assert ci[0] == 0.0
+    assert ci[1] > 0.0
+    # 25/25 -> lower bound below 1.
+    ci_all = wilson_interval(25, 25)
+    assert ci_all is not None
+    assert ci_all[1] == 1.0
+    assert ci_all[0] < 1.0
+    assert wilson_interval(0, 0) is None
 
 
 def test_per_class_rows_and_error_rates() -> None:

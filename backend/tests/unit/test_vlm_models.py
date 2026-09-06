@@ -57,14 +57,28 @@ def test_assessment_forbids_extra_fields() -> None:
         )
 
 
-def test_assessment_rejects_invalid_evidence_code() -> None:
+def test_assessment_retains_unknown_evidence_codes() -> None:
+    # Real providers emit codes beyond the controlled enum; they are retained as observations,
+    # never treated as ground truth (M4 §38).
+    assessment = VlmAssessment.model_validate(
+        {
+            "classification": "QUALITY_FAILURE",
+            "attack_medium": "NONE",
+            "self_reported_confidence": 0.9,
+            "evidence_codes": ["BLANK_FRAME", "NO_FACE_DETECTED"],
+        }
+    )
+    assert assessment.evidence_codes == ["BLANK_FRAME", "NO_FACE_DETECTED"]
+
+
+def test_assessment_rejects_excessive_evidence_codes() -> None:
     with pytest.raises(ValidationError):
         VlmAssessment.model_validate(
             {
                 "classification": "LIVE",
                 "attack_medium": "NONE",
                 "self_reported_confidence": 0.9,
-                "evidence_codes": ["NOT_A_CODE"],
+                "evidence_codes": [f"code-{i}" for i in range(30)],
             }
         )
 
