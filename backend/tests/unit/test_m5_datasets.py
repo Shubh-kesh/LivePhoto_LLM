@@ -22,8 +22,10 @@ from app.experiments.vlm.datasets.licensing import (
     require_usable_dataset,
 )
 from app.experiments.vlm.datasets.registry import (
+    ExternalProcessingStatus,
     LicenseState,
     is_usable_for_external_vlm,
+    is_usable_for_local_only,
     registry,
 )
 from app.experiments.vlm.datasets.sampling import (
@@ -42,27 +44,62 @@ def test_known_datasets_have_honest_license_state() -> None:
         "replay-mobile",
         "oulu-npu",
         "siw",
-        "axon-sample",
     ):
         assert name in reg, name
         descriptor = reg[name]
-        # None is marked ALLOWED without explicit authorization; most are research-only.
+        # Agreement-gated / restricted datasets are never silently ALLOWED.
         assert descriptor.license_state in (
             LicenseState.NOT_ALLOWED,
-            LicenseState.UNCLEAR,
+            LicenseState.ALLOWED_FOR_LOCAL_ONLY,
             LicenseState.REQUIRES_APPROVAL,
+            LicenseState.UNCLEAR,
         )
     assert is_usable_for_external_vlm(reg["replay-attack"]) is False
+    assert is_usable_for_external_vlm(reg["celebA-spoof"]) is False
+
+
+def test_axon_public_sample_is_po_use_allowed_for_poc() -> None:
+    reg = registry()
+    axon = reg["axon-face-anti-spoofing-sample"]
+    assert axon.license_state is LicenseState.ALLOWED_FOR_POC
+    assert axon.external_vlm_processing is ExternalProcessingStatus.ALLOWED
+    assert is_usable_for_external_vlm(axon) is True
+    assert axon.usage_purpose == "NON_COMMERCIAL_POC_RESEARCH"
+    assert axon.review_date
+
+
+def test_celeb_a_spoof_is_local_only_and_not_external() -> None:
+    reg = registry()
+    descriptor = reg["celebA-spoof"]
+    assert descriptor.license_state is LicenseState.ALLOWED_FOR_LOCAL_ONLY
+    assert descriptor.external_vlm_processing is ExternalProcessingStatus.NOT_ALLOWED
+    assert is_usable_for_local_only(descriptor) is True
+    assert is_usable_for_external_vlm(descriptor) is False
+
+
+def test_oulu_npu_requires_approval() -> None:
+    reg = registry()
+    assert reg["oulu-npu"].license_state is LicenseState.REQUIRES_APPROVAL
+    assert is_usable_for_external_vlm(reg["oulu-npu"]) is False
 
 
 def test_evaluate_dataset_reports_restricted_usage() -> None:
     _, decision = evaluate_dataset("replay-attack")
-    assert "NOT_ALLOWED" in decision
+    assert "REQUIRES_APPROVAL" in decision
+    _, local_decision = evaluate_dataset("celebA-spoof")
+    assert "ALLOWED_FOR_LOCAL_ONLY" in local_decision
 
 
 def test_require_usable_dataset_blocks_restricted() -> None:
     with pytest.raises(DatasetLicenseError):
         require_usable_dataset("replay-attack")
+    with pytest.raises(DatasetLicenseError):
+        require_usable_dataset("celebA-spoof")  # local-only, not external
+
+
+def test_require_usable_dataset_allows_axon_poc() -> None:
+    descriptor = require_usable_dataset("axon-face-anti-spoofing-sample")
+    assert descriptor.name == "axon-face-anti-spoofing-sample"
 
 
 def test_require_usable_dataset_blocks_unknown() -> None:
@@ -216,3 +253,9 @@ def test_validation_report_written_without_images(tmp_path: Path) -> None:
     # No image bytes (JPEG signature/base64) are ever written.
     assert "\xff\xd8" not in content
     assert "base64" not in content
+
+
+def test_screen_display_label_mapping() -> None:
+    assert map_label("screen_display") == ("SCREEN_DISPLAY", False)
+    assert map_label("screen") == ("SCREEN_DISPLAY", False)
+    assert map_label("display_replay") == ("SCREEN_DISPLAY", False)

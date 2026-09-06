@@ -1,15 +1,15 @@
-"""Dataset licensing decision helpers (M5 §7-12, §107-108).
+"""Dataset licensing decision helpers (M5 §7-12, §107-108; continuation §3).
 
-The coding agent does NOT declare "legally approved" unless documented approval exists. We use
-"license appears compatible based on published terms" or "requires organization/legal
-confirmation". If no dataset clearly supports the intended usage, the gate is BLOCKED.
+M5 public-dataset use purpose = NON_COMMERCIAL_POC_RESEARCH. The coding agent does NOT declare
+"legally approved"; it reports "license appears compatible based on published terms" or "requires
+organization/legal confirmation". If no dataset clearly supports the intended POC use, the gate is
+BLOCKED.
 """
 
 from __future__ import annotations
 
 from app.experiments.vlm.datasets.registry import (
     DatasetDescriptor,
-    ExternalProcessingStatus,
     LicenseState,
     is_usable_for_external_vlm,
     registry,
@@ -31,36 +31,44 @@ def evaluate_dataset(name: str) -> tuple[DatasetDescriptor, str]:
                 name=name,
                 version="unknown",
                 source="unknown",
+                download_source=None,
                 mirror_source=None,
                 license_state=LicenseState.UNCLEAR,
                 license_note="Unknown dataset; LICENSE_REVIEW_REQUIRED.",
-                classes=(),
-                external_vlm_processing=ExternalProcessingStatus.UNCLEAR,
-                access_restrictions="Unclear",
-                image_or_video="image",
             ),
             "LICENSE_REVIEW_REQUIRED — dataset not in the known registry.",
         )
 
     if is_usable_for_external_vlm(descriptor):
-        return descriptor, "license appears compatible based on published terms"
+        return descriptor, (
+            "license appears compatible based on published terms for NON_COMMERCIAL POC/RESEARCH "
+            "use, including external VLM processing (attribution required; not for commercial use)."
+        )
+    if descriptor.license_state == LicenseState.ALLOWED_FOR_LOCAL_ONLY:
+        return descriptor, (
+            "ALLOWED_FOR_LOCAL_ONLY — non-commercial research use appears permitted locally, but "
+            "external VLM processing is NOT allowed; keep the data local for POC."
+        )
+    if descriptor.license_state == LicenseState.REQUIRES_APPROVAL:
+        return descriptor, (
+            "REQUIRES_APPROVAL — an EULA / signed agreement / owner permission is required before "
+            "use; do not bypass via a mirror."
+        )
     if descriptor.license_state == LicenseState.NOT_ALLOWED:
         return descriptor, (
-            "NOT_ALLOWED — official terms are non-commercial research and/or require a signed "
-            "agreement; not usable for this commercial project or external-provider processing "
-            "without approval."
+            "NOT_ALLOWED — terms clearly prohibit the intended use under this purpose."
         )
     return descriptor, (
-        "LICENSE_REVIEW_REQUIRED — usage rights are unclear; do not use until confirmed by "
-        "organization/legal."
+        "UNCLEAR — published terms are insufficient to determine whether external-provider "
+        "processing is acceptable; do not use until confirmed by organization/legal."
     )
 
 
 def require_usable_dataset(name: str) -> DatasetDescriptor:
-    """Raise DatasetLicenseError unless the dataset is clearly usable for external-VLM use."""
+    """Raise DatasetLicenseError unless the dataset is clearly usable for external-VLM POC use."""
     descriptor, decision = evaluate_dataset(name)
     if not is_usable_for_external_vlm(descriptor):
         raise DatasetLicenseError(
-            f"dataset '{name}' is not usable for external-VLM use: {decision}"
+            f"dataset '{name}' is not usable for external-VLM POC use: {decision}"
         )
     return descriptor

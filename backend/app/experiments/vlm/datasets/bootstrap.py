@@ -27,6 +27,7 @@ from app.experiments.vlm.datasets.frame_extraction import (
 )
 from app.experiments.vlm.datasets.labelmap import map_label
 from app.experiments.vlm.datasets.licensing import require_usable_dataset
+from app.experiments.vlm.datasets.registry import find_dataset
 from app.experiments.vlm.datasets.sampling import (
     SAMPLING_VERSION,
     SPLIT_VERSION,
@@ -123,9 +124,15 @@ def build_manifest(config: BootstrapConfig) -> Path:
     samples_dir = config.output_dir / "samples"
     samples_dir.mkdir(parents=True, exist_ok=True)
 
+    descriptor = find_dataset(config.dataset_name)
+    license_status = descriptor.license_state.value if descriptor else "UNCLEAR"
+    usage_purpose = descriptor.usage_purpose if descriptor else "NON_COMMERCIAL_POC_RESEARCH"
+
+    holdout_ids = {pair[0].sample_id for pair in holdout}
+
     rows: list[dict[str, Any]] = []
     for index, (item, canonical) in enumerate(dev + holdout, start=1):
-        split_name: str = "holdout" if (item, canonical) in set(holdout) else "dev"
+        split_name: str = "holdout" if item.sample_id in holdout_ids else "dev"
         frames: list[str] = []
         for source_frame in item.frames:
             source_path = Path(source_frame)
@@ -151,6 +158,8 @@ def build_manifest(config: BootstrapConfig) -> Path:
                 "presentation_border_visible": item.presentation_border_visible,
                 "lighting": item.lighting,
                 "prompt_injection": item.prompt_injection,
+                "license_status": license_status,
+                "usage_purpose": usage_purpose,
                 "frames": frames,
             }
         )

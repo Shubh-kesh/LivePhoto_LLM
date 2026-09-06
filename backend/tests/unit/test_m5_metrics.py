@@ -109,3 +109,12 @@ def test_validate_run_flags_guards() -> None:
     assert "--max-requests" in (validate_run_flags("gemini", True, None, 5) or "")
     assert "exceeds" in (validate_run_flags("gemini", True, 3, 5) or "")
     assert validate_run_flags("gemini", True, 10, 5) is None
+
+
+def test_screen_display_maps_to_screen_replay() -> None:
+    correct = _record("s", "SCREEN_DISPLAY", "SCREEN_REPLAY", "single-quality-v1")
+    wrong = _record("s", "SCREEN_DISPLAY", "LIVE", "single-quality-v1")
+    from app.experiments.vlm.metrics import is_correct
+
+    assert is_correct(correct) is True
+    assert is_correct(wrong) is False

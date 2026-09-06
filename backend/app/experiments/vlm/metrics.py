@@ -35,6 +35,7 @@ LABEL_TO_CLASSIFICATION: dict[str, VlmClassification] = {
     "SCREEN_TABLET": VlmClassification.SCREEN_REPLAY,
     "SCREEN_LAPTOP": VlmClassification.SCREEN_REPLAY,
     "SCREEN_MONITOR": VlmClassification.SCREEN_REPLAY,
+    "SCREEN_DISPLAY": VlmClassification.SCREEN_REPLAY,
     "PRINT_PHOTO": VlmClassification.PRINT_ATTACK,
     "PRINT_NEWSPAPER": VlmClassification.PRINT_ATTACK,
     "PRINT_MAGAZINE": VlmClassification.PRINT_ATTACK,

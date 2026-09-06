@@ -132,6 +132,9 @@ def _load_completed(results_path: Path) -> set[str]:
                 data = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if data.get("error"):
+                # Errored samples are NOT complete; resume will re-run them (continuation §28).
+                continue
             keys.add(
                 json.dumps(
                     [
@@ -166,10 +169,23 @@ async def evaluate_samples(
     if max_requests is not None:
         items = items[:max_requests]
     completed = set() if rerun else _load_completed(results_path)
+    # Preserve previously completed (non-error) results across resumes instead of overwriting.
+    prior_successes: list[ResultRecord] = []
+    if not rerun and results_path.exists():  # noqa: ASYNC240
+        for line in results_path.read_text(encoding="utf-8").splitlines():  # noqa: ASYNC240
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = ResultRecord.model_validate(json.loads(line))
+            except Exception:
+                continue
+            if record.error is None:
+                prior_successes.append(record)
     semaphore = asyncio.Semaphore(max(1, concurrency))
     limiter = RateLimiter(rps)
     lock = asyncio.Lock()
-    results: list[ResultRecord] = []
+    results: list[ResultRecord] = list(prior_successes)
     errors = 0
     started = time.perf_counter()
 
@@ -245,6 +261,24 @@ def _read_sample_frames(sample: DatasetSample, strategy: str) -> list[ImageInput
         ImageInput(bytes=path.read_bytes(), mime_type="image/jpeg", sequence=index)
         for index, path in enumerate(selected)
     ]
+
+
+def _dedupe_records(records: list[ResultRecord]) -> list[ResultRecord]:
+    """Keep the best row per (sample, strategy, provider, model, repetition): non-error wins,
+    otherwise the latest."""
+    best: dict[tuple[str, str, str, str, int | None], ResultRecord] = {}
+    for record in records:
+        key = (
+            record.sample_id,
+            record.frame_strategy,
+            record.provider,
+            record.model,
+            record.repetition,
+        )
+        existing = best.get(key)
+        if existing is None or (existing.error is not None and record.error is None):
+            best[key] = record
+    return list(best.values())
 
 
 def _git_info() -> tuple[str, bool]:
@@ -344,6 +378,7 @@ def main() -> None:
     )
 
     if records:
+        records = _dedupe_records(records)
         metrics = compute_metrics(records)
         config = {
             "run_id": run_id,

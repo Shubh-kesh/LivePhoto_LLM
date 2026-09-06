@@ -1,75 +1,91 @@
 # LivePhoto — M5 Dataset Bootstrap (Public Dataset Discovery & Licensing)
 
-Status: M5 baseline. Documented per M5 §105-108.
+Status: M5 baseline (continuation). Documented per M5 §105-108 and the M5 continuation brief.
 
-## Result
+## Dataset use purpose
 
-**POC DATASET GATE = BLOCKED** (no dataset is legally cleared for this commercial project's
-external-VLM benchmark without explicit approval). Engineering tooling is ready; the required user
-action is listed at the end.
+```
+M5 DATASET USE PURPOSE = NON_COMMERCIAL_POC_RESEARCH
+```
 
-## Datasets investigated
+Public datasets are used ONLY for a non-commercial POC/research evaluation. They are NOT used for
+production, sold, redistributed, incorporated into a commercial training dataset, used to train a
+production banking model, or used as production customer data. Any future commercial use requires a
+completely separate dataset/license review (continuation §1, §48). A dataset accepted for M5 POC is
+therefore NOT automatically approved for any commercial purpose.
 
-| Dataset | Official source | Mirror | License / access | Classes | External-VLM processing | Verdict |
-|---|---|---|---|---|---|---|
-| CelebA-Spoof | GitHub `open-the-loop/celebA-spoof` | n/a | Research/non-commercial terms; attribution expected | LIVE, phone/print | UNCLEAR | NOT ALLOWED without confirmation |
-| Replay-Attack | Idiap Research Institute | n/a | Non-commercial research; signed Idiap agreement | LIVE, phone/laptop/print | NOT_ALLOWED | NOT ALLOWED |
-| Replay-Mobile | Idiap Research Institute | n/a | Non-commercial research; signed agreement | LIVE, phone/print | NOT_ALLOWED | NOT ALLOWED |
-| OULU-NPU | University of Oulu | n/a | Non-commercial research; terms acceptance | LIVE, phone/tablet/print | NOT_ALLOWED | NOT ALLOWED |
-| SiW (MSU) | Michigan State University | n/a | Non-commercial research terms | LIVE, phone/print | NOT_ALLOWED | NOT ALLOWED |
-| Axon sample sets | Axon (public samples) | n/a | Unclear | LIVE, phone/print | UNCLEAR | LICENSE_REVIEW_REQUIRED |
+## License model
 
-A Kaggle/Hugging Face mirror does **not** override the original dataset license (M5 §9). None of
-the above are used for external-provider benchmarking in M5.
+Dataset license state is assessed **under the NON_COMMERCIAL_POC_RESEARCH purpose** (not under a
+hypothetical commercial context):
 
-## Selection rule (M5 §8, §12)
+| State | Meaning |
+|---|---|
+| `ALLOWED_FOR_POC` | Terms reasonably allow non-commercial research evaluation **and** our intended external VLM processing |
+| `ALLOWED_FOR_LOCAL_ONLY` | Non-commercial research locally is permitted, but external VLM processing is questionable/prohibited |
+| `REQUIRES_APPROVAL` | EULA / institutional / owner permission required |
+| `NOT_ALLOWED` | Terms clearly prohibit the intended use |
+| `UNCLEAR` | Published terms insufficient to determine external-processing acceptability |
 
-A dataset is used only if **all** are reasonably supported: provenance understood; ground-truth
-labels exist; usage rights compatible with the current POC (commercial banking intent); third-party
-VLM processing allowed or approved; trusted download source. If no dataset qualifies:
-**POC DATASET GATE = BLOCKED** (M5 §12, §108).
+The relevant question is now: *does the dataset permit this specific non-commercial POC/research
+evaluation, including external VLM processing?* — not *could it ever be used commercially?*
 
-## External-provider-processing assessment
+## Selected dataset
 
-External API submission of dataset images may constitute third-party processing or distribution.
-For all research-only/non-commercial datasets above, external submission is **NOT** treated as
-authorized.
+**Axon public face-anti-spoofing sample** (`AxonData/face-anti-spoofing-dataset` on Hugging Face).
 
-## Bootstrap tooling (ready)
+- **Official source:** Axon Labs / AxonData (the Hugging Face publication is the original source;
+  a Kaggle mirror exists but does not override the license).
+- **License:** CC BY-NC 4.0.
+- **Purpose assessment:** For NON_COMMERCIAL_POC_RESEARCH with attribution, non-commercial
+  evaluation including sending a selected subset to an external VLM is **reasonably permitted**
+  (API processing is not redistribution). NOT for production/commercial use.
+- **License state:** `ALLOWED_FOR_POC`; external VLM processing: `ALLOWED` (with attribution and
+  no commercial use).
+- **Classes available in the sample:** `LIVE` (Selfies, 24 stills), `SCREEN_MOBILE`
+  (Replay_mobile_attacks, 10 videos), `SCREEN_DISPLAY` (Replay_display_attacks/Screen, 5 videos).
+  Mask classes exist (3D paper, cut-out, latex, silicone, textile, wrapped) but are outside the
+  M5 four-class scope. **No PRINT_PHOTO class is present** — reported as a class gap.
+- **External-processing assessment:** sending the selected subset to Gemini for the POC is treated
+  as non-commercial processing; attribution required; no redistribution.
+- **Download:** `app/experiments/vlm/datasets/axon.py` → git-ignored `local-data/vlm-baseline/`.
 
-- `backend/app/experiments/vlm/datasets/registry.py` — dataset descriptors + honest license state.
-- `licensing.py` — `require_usable_dataset` refuses restricted/unknown datasets.
-- `sampling.py` — seeded deterministic sampling, subject-diverse sampling, subject/session-disjoint
-  dev/holdout splits.
-- `labelmap.py` — canonical label mapping; ambiguous labels are never guessed.
-- `frame_extraction.py` — deterministic 25/50/75% video-frame extraction (`frame-extraction-v1`).
-- `bootstrap.py` — builds the git-ignored output manifest with full traceability
-  (source dataset/sample/label, canonical label, split, subject alias, device classes, border
-  visibility, lighting, prompt-injection flag).
-- `validate_dataset.py` — `uv run python -m app.experiments.vlm.validate_dataset --manifest ...`
-  (unique IDs, allowed labels/splits, file existence, JPEG validity, SHA-256 duplicates,
-  path-traversal rejection, schema) → `dataset_validation.json`.
+## Other datasets investigated (reassessed under POC purpose)
 
-## Sampling / split policy (M5 §25-28)
+| Dataset | Source | License state | External VLM |
+|---|---|---|---|
+| CelebA-Spoof | GitHub open-the-loop/celebA-spoof | `ALLOWED_FOR_LOCAL_ONLY` | `NOT_ALLOWED` (keep local; do not submit externally) |
+| Replay-Attack | Idiap | `REQUIRES_APPROVAL` (signed agreement) | `NOT_ALLOWED` |
+| Replay-Mobile | Idiap | `REQUIRES_APPROVAL` (signed agreement) | `NOT_ALLOWED` |
+| OULU-NPU | University of Oulu | `REQUIRES_APPROVAL` (EULA/terms) | `NOT_ALLOWED` |
+| SiW (MSU) | Michigan State University | `REQUIRES_APPROVAL` (institutional) | `NOT_ALLOWED` |
 
-- Deterministic seeded sampling (`sampling-v1`); diversity across subject/device/lighting when
-  metadata exists; never "first N files".
-- No near-duplicate counting (distinct subjects/sessions/presentation instruments preferred).
-- Subject/session-disjoint `development`/`holdout` split (`split-v1`); holdout is not tuned
-  against.
+A mirror (Kaggle/Hugging Face/GitHub/Drive) does **not** override the original license.
 
-## Dataset limitations
+## Bootstrap procedure (reproducible)
 
-- Public PAD images are NOT equivalent to LivePhoto native browser captures (camera pipeline,
-  compression, framing, guidance, burst selection, device characteristics differ) — M5 results
-  would be labelled `PUBLIC DATASET VLM BASELINE`, never `LIVEPHOTO CAPTURE-PIPELINE BASELINE`
-  (M5 §34, §46, §86).
+1. `python -m app.experiments.vlm.datasets.axon`-style downloader writes a raw manifest
+   (`local-data/vlm-baseline/raw_manifest.jsonl`) with source dataset/sample/label, subject alias,
+   device classes.
+2. `bootstrap.build_manifest` maps labels (`live`→LIVE, `mobile`→SCREEN_MOBILE,
+   `screen_display`→SCREEN_DISPLAY), extracts deterministic frames from videos
+   (single = 50% midpoint; triad = 25/50/75%, `frame-extraction-v1`), samples deterministically
+   (`sampling-v1`), creates subject-disjoint dev/holdout splits (`split-v1`), and writes
+   `manifest.jsonl` with full traceability (source dataset/sample/label, canonical label, split,
+   subject alias, device classes, border visibility, lighting, `license_status`, `usage_purpose`).
+3. `uv run python -m app.experiments.vlm.validate_dataset --manifest ... --output ...` produces
+   `dataset_validation.json` (unique IDs, valid labels, file existence, JPEG decode, SHA-256
+   duplicates, path-traversal rejection, split validity).
 
-## Required user action to unblock
+## Commercial-future warning
 
-- Obtain dataset license/EULA approval (e.g., a signed institutional agreement for Replay-Attack,
-  Replay-Mobile, OULU-NPU, or confirmation that a chosen dataset's terms permit commercial +
-  third-party processing), **or**
-- Collect own **consented** POC captures (people physically present → LIVE; photos displayed on
-  phone/laptop → screen spoofs; printed photos → print spoofs) with documented provenance, **or**
-- Obtain an organization/legal decision that a specific dataset may be used.
+Any dataset accepted for the M5 POC is NOT automatically approved for production use, commercial
+training, bank deployment, model fine-tuning, or redistribution. A new license/governance review is
+required before any commercial purpose (continuation §48).
+
+## POC composition (as built)
+
+- LIVE: 24, SCREEN_MOBILE: 10, SCREEN_DISPLAY: 5 (total 39). PRINT_PHOTO: **0** (class gap; no
+  print class in the Axon sample — not fabricated).
+- Split: development 8 / holdout 31 (subject-disjoint).
+- Frames: LIVE = native stills (1 frame each); video classes = 3 extracted frames each.

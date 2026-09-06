@@ -18,6 +18,7 @@ GroundTruthLabel = Literal[
     "SCREEN_TABLET",
     "SCREEN_LAPTOP",
     "SCREEN_MONITOR",
+    "SCREEN_DISPLAY",
     "PRINT_PHOTO",
     "PRINT_NEWSPAPER",
     "PRINT_MAGAZINE",

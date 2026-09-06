@@ -112,7 +112,17 @@ mobile camera manually verified, and a genuine/spoof POC dataset evaluated (M4 �
 
 ## M5 status
 
-Real Gemini smoke executed (single + triad, structured output valid, ~2.6-2.9 s). Accuracy baseline
-**NOT MEASURED** — the public-dataset gate is BLOCKED (no legally-cleared dataset for external-VLM
-use); physical device gates NOT COMPLETE. See `docs/M5_DATASET_BOOTSTRAP.md` and
+**Purpose correction (continuation):** M5 public-dataset use purpose = `NON_COMMERCIAL_POC_RESEARCH`.
+The Axon public face-anti-spoofing sample (CC BY-NC 4.0) was selected (`ALLOWED_FOR_POC`,
+external-VLM allowed for the POC) and bootstrapped to 39 samples (LIVE 24, SCREEN_MOBILE 10,
+SCREEN_DISPLAY 5; dev 8 / holdout 31). See `docs/M5_DATASET_BOOTSTRAP.md` and
 `docs/M5_VLM_BASELINE_RESULTS.md`.
+
+Real Gemini (`gemini-3.8-flash`) smoke: single + triad returned valid structured output
+(~2.6–2.9 s on a tiny synthetic frame). On real face images the benchmark ran, but the Gemini
+free-tier **daily quota was exhausted mid-run** (large-scale 429/PROVIDER_RATE_LIMITED). Completed
+results are preserved and resumable (`--rerun`-free resume skips completed, re-runs errored;
+`--rps` is used to respect provider rate limits). The public-dataset VLM baseline is therefore
+**PARTIAL / resumable**, not fully measured. No accuracy statement is made from the partial set.
+
+Physical device gates remain NOT COMPLETE; the native LivePhoto-capture baseline is NOT MEASURED.

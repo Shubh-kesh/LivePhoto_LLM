@@ -50,5 +50,9 @@ tested on that environment.** The developer/user populates results after manual 
 - **M5 real-provider smoke:** the configured Gemini provider (`gemini-3.8-flash`) returned valid
   structured output on 1-frame and 3-frame synthetic inputs (see `docs/M5_VLM_BASELINE_RESULTS.md`).
   This proves integration, not device or accuracy behaviour.
+- **M5 continuation:** public-dataset purpose corrected to NON_COMMERCIAL_POC_RESEARCH; Axon sample
+  bootstrapped (39 samples) and a partial real Gemini baseline measured (3/3 conclusive correct,
+  0 spoof→LIVE; free-tier quota exhausted for the remainder — resumable). This is the PUBLIC
+  DATASET VLM BASELINE track; it does not validate the LivePhoto capture pipeline.
 - Laptop/mobile device rows remain **NOT TESTED** (physical-device testing not performed in this
   environment).

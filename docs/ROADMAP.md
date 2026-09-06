@@ -1,9 +1,9 @@
 # LivePhoto — Roadmap (M0 Baseline, updated for M1)
 
-Status: **M0-M4 COMPLETE. M5 ENGINEERING COMPLETE (overall PARTIAL/BLOCKED: accuracy benchmark not
-measured — dataset + device gates pending).** M6+ are planned and are **not implemented** in M5.
-Each milestone: goal / scope / non-scope / dependencies / deliverables / acceptance criteria /
-major risks.
+Status: **M0-M4 COMPLETE. M5 ENGINEERING COMPLETE / OVERALL PARTIAL** (real Gemini smoke + partial
+public POC baseline; quota-limited remainder resumable; device gates NOT COMPLETE). M6+ are planned
+and are **not implemented** in M5. Each milestone: goal / scope / non-scope / dependencies /
+deliverables / acceptance criteria / major risks.
 
 Dependencies and acceptance criteria reference the design docs in this repository. Milestones may
 be re-sequenced as evaluation results (M4–M9) dictate.
@@ -94,23 +94,25 @@ be re-sequenced as evaluation results (M4–M9) dictate.
 - **Major risks:** No live providers exercised; no real-device accuracy; dataset not yet collected.
 
 ## M5 — Baseline Evaluation
-- **Status: ENGINEERING COMPLETE; OVERALL PARTIAL/BLOCKED** (real-provider smoke done; accuracy
-  benchmark NOT MEASURED — dataset gate blocked; device gates NOT COMPLETE).
+- **Status: ENGINEERING COMPLETE; OVERALL PARTIAL** (real Gemini smoke + partial public-dataset
+  baseline; dataset purpose corrected to NON_COMMERCIAL_POC_RESEARCH; quota-limited remainder
+  resumable; device gates NOT COMPLETE).
 - **Goal:** Real VLM baseline + failure analysis.
-- **Scope:** M4 regression; fake-camera correction verified; artifact audit; dataset registry +
-  licensing review (all candidates research/non-commercial → POC dataset gate BLOCKED); bootstrap/
-  sampling/splits/label-mapping/frame-extraction/validation tooling; runner guards (dry-run, live
-  opt-in, max-requests), run metadata (git SHA/dirty, manifest hash), Wilson-CI metrics, high-
-  confidence errors, paired strategy comparison, repeatability, prompt-injection subset, M6
-  priority analysis; real Gemini smoke (single + triad); docs.
-- **Non-scope:** M6 detectors; ensembles; bank decisions; active liveness; dataset downloads
-  without license.
+- **Scope:** M4 regression; fake-camera correction verified; artifact audit; dataset licensing
+  reassessed under NON_COMMERCIAL_POC_RESEARCH (Axon selected, CC BY-NC 4.0); bootstrap/sampling/
+  splits/label-mapping/frame-extraction/validation tooling; runner guards (dry-run, live opt-in,
+  max-requests), resume semantics (skips completed, re-runs errored, preserves successes), run
+  metadata, Wilson-CI metrics, high-confidence errors, paired strategy comparison, repeatability,
+  prompt-injection subset, M6 priority analysis; real Gemini smoke + partial public baseline;
+  docs.
+- **Non-scope:** M6 detectors; ensembles; bank decisions; active liveness.
 - **Dependencies:** M4.
 - **Deliverables:** `datasets/` package, `validate_dataset` CLI, metrics/report extensions,
   `docs/M5_DATASET_BOOTSTRAP.md`, `docs/M5_VLM_BASELINE_RESULTS.md`.
-- **Acceptance criteria:** M5 §110 — satisfied where possible; items 5/6 (provider) and tooling
-  complete; items 8/12 (dataset + benchmark) and 33/34 (device gates) BLOCKED/NOT COMPLETE.
-- **Major risks:** Dataset licensing; physical device availability.
+- **Acceptance criteria:** M5 §110 — engineering complete; provider gate complete; dataset gate
+  complete (POC purpose); accuracy baseline PARTIAL (quota-limited, resumable); device gates
+  NOT COMPLETE.
+- **Major risks:** Gemini free-tier daily quota; physical device availability.
 
 ## M6 — Screen/Device/Print Detection
 - **Goal:** Detect Phase-1 static presentation attacks.
