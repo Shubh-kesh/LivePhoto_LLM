@@ -1,8 +1,8 @@
-# LivePhoto — Roadmap (M0 Baseline, updated for M1)
+# LivePhoto — Roadmap (M0 Baseline, updated for M5.5)
 
-Status: **M0-M4 COMPLETE. M5 ENGINEERING COMPLETE / OVERALL PARTIAL** (real Gemini smoke + partial
-public POC baseline; quota-limited remainder resumable; device gates NOT COMPLETE). M6+ are planned
-and are **not implemented** in M5. Each milestone: goal / scope / non-scope / dependencies /
+Status: **M0-M5 COMPLETE. M5.5 COMPLETE** (banking-grade guided capture UX & onboarding). M5 public
+POC baseline remains PARTIAL (quota-limited, resumable; device gates NOT COMPLETE). M6+ are planned
+and are **not implemented** in M5/M5.5. Each milestone: goal / scope / non-scope / dependencies /
 deliverables / acceptance criteria / major risks.
 
 Dependencies and acceptance criteria reference the design docs in this repository. Milestones may
@@ -113,6 +113,39 @@ be re-sequenced as evaluation results (M4–M9) dictate.
   complete (POC purpose); accuracy baseline PARTIAL (quota-limited, resumable); device gates
   NOT COMPLETE.
 - **Major risks:** Gemini free-tier daily quota; physical device availability.
+
+## M5.5 — Banking Capture UX & Guided Onboarding
+- **Status: COMPLETE.**
+- **Goal:** Transform the functional capture UI into a polished, trustworthy, banking-grade
+  face-photo capture experience while preserving the M2/M3 capture and quality engines.
+- **Scope:** M5.5 guided journey (preparation -> permission explanation -> camera -> quality ->
+  review -> success); original local SVG/CSS preparation animation; three-step progress model;
+  camera-dominant mobile + contained desktop layouts; polished face-guide/guidance presentation
+  (neutral/needs_attention/ready); circular shutter + secondary camera switch; invisible burst
+  ("Hold still…"); checking-quality screen; quality-retry with reason-mapped customer copy;
+  separate camera/technical error UX; review/retake/use-photo; capture-success wording only;
+  help overlay (non-destructive); intentional back navigation with stream cleanup; refresh returns
+  to preparation (no persistence); small reusable design system + tokens + local icons;
+  centralized copy (localization seam); white-label seam (BrandHeader + tokens); VLM experiment
+  moved behind the explicit `/dev/vlm-experiment` route; docs (design, QA checklist, branding);
+  component tests + Playwright polished-journey/retry/permission-denied E2E.
+- **Non-scope:** VLM/PAD/screen/print detection; quality thresholds; face detector; provider/Gemini
+  logic; backend/API changes; decision/PASS-FAIL semantics; M6 accuracy roadmap.
+- **Dependencies:** M2, M3 (capture + quality engines authoritative).
+- **Deliverables:** `src/design-system/` (tokens + Button/IconButton/ProgressSteps/StatusMessage/
+  ScreenLayout/Card/LoadingIndicator/BrandHeader + SVG icons); capture UI screens +
+  `captureCopy`; `docs/CAPTURE_UX_DESIGN.md`, `docs/CAPTURE_UX_QA_CHECKLIST.md`,
+  `docs/BRANDING_INTEGRATION.md`.
+- **Acceptance criteria:** M5.5 §106 (1–53): fresh visit shows preparation; camera not opened
+  automatically; animated instructions; separate permission explanation; Open-camera-only flow;
+  progress model; mobile-first + polished desktop; face guide + single stabilized guidance; Ready
+  wording only; shutter obvious, switch secondary; burst unchanged; checking-quality UX; retry UI
+  + reason copy; technical vs quality error separation; review/retake/use-photo; success wording
+  only (no verification claims); full-frame pixels + mirroring unchanged; refresh->preparation; no
+  persistence; stream/object-URL cleanup; reduced motion; keyboard/focus/touch/safe-area/100dvh;
+  no HyperVerge assets; no remote UI assets; experiment controls off the customer path; all checks
+  green (frontend lint/format/type/test/build/E2E, backend regression); docs updated; clean tree.
+- **Major risks:** None significant (UX-only; no camera-API/security changes).
 
 ## M6 — Screen/Device/Print Detection
 - **Goal:** Detect Phase-1 static presentation attacks.

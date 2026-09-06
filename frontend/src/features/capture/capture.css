@@ -1,43 +1,25 @@
-/* Capture experience styles (M2 §55-59). */
+/* Capture experience styles — M5.5 guided capture (uses design-system tokens). */
 
 .capture-page {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
+  min-height: 100dvh;
+  min-height: 100vh;
+  background: var(--lp-color-background);
 }
 
-.capture-page h1 {
-  margin: 0;
-  font-size: 1.5rem;
-}
+/* ------------------------------------------------------------------ */
+/* Camera screen                                                       */
+/* ------------------------------------------------------------------ */
 
-.capture-intro,
-.capture-preview,
-.capture-error,
-.capture-confirmed {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.camera-viewport {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.camera-stage {
+.camera-screen {
   position: relative;
   width: 100%;
-  max-width: 560px;
-  aspect-ratio: 3 / 4;
+  height: 100dvh;
+  height: 100vh;
   overflow: hidden;
-  border-radius: 1rem;
   background: #000;
-  margin: 0 auto;
 }
 
-.camera-video {
+.camera-screen__video {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -45,12 +27,69 @@
   object-fit: cover;
 }
 
-/* Preview mirroring is presentation only; captured pixels are never mirrored (M2 §13). */
-.camera-video--mirror {
+/* Preview mirroring is presentation-only; captured pixels are never mirrored (M2 §13, M5.5 §84). */
+.camera-screen__video--mirror {
   transform: scaleX(-1);
 }
 
-.camera-guide {
+/* Keep the video mounted (invisible) while permission/analysis/retry are shown. */
+.camera-screen--hidden {
+  position: absolute;
+  inset: 0;
+  width: 0;
+  height: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.camera-screen__topbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: calc(var(--lp-safe-top) + var(--lp-space-2)) var(--lp-space-4);
+}
+
+.camera-screen__top-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: var(--lp-radius-full);
+  background: rgba(12, 15, 20, 0.45);
+  color: #fff;
+  cursor: pointer;
+}
+.camera-screen__top-action:focus-visible {
+  outline: none;
+  box-shadow: var(--lp-focus-ring);
+}
+.camera-screen__top-action:hover {
+  background: rgba(12, 15, 20, 0.65);
+}
+
+.camera-screen__step {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: var(--lp-font-size-sm);
+  font-weight: var(--lp-font-weight-semibold);
+  padding: 0.35rem 0.9rem;
+  border-radius: var(--lp-radius-full);
+  background: rgba(12, 15, 20, 0.45);
+}
+
+.camera-screen__stage {
+  position: absolute;
+  inset: 0;
+}
+
+/* Face guide — a CSS overlay only. It never crops the frame (full-frame pixels preserved). */
+.camera-screen__guide {
   position: absolute;
   inset: 0;
   display: flex;
@@ -59,227 +98,685 @@
   pointer-events: none;
 }
 
-.camera-guide__oval {
-  width: 62%;
-  max-width: 320px;
+.camera-screen__oval {
+  width: 58%;
+  max-width: 300px;
   aspect-ratio: 3 / 4;
-  border: 3px solid rgba(255, 255, 255, 0.85);
   border-radius: 50%;
-  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.28);
+  border: 3px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.26);
+  transition:
+    border-color var(--lp-motion-base) var(--lp-ease-out),
+    box-shadow var(--lp-motion-base) var(--lp-ease-out);
 }
 
-/* Guide states are mirrored in text guidance (never color alone, M3 §68). */
-.camera-guide__oval--guidance {
-  border-color: #ffb300;
+/* Guide visual states: neutral / needs_attention / ready (never liveness states). */
+.camera-screen__oval--neutral {
+  border-color: rgba(255, 255, 255, 0.9);
+}
+.camera-screen__oval--needs_attention {
+  border-color: #ffc24d;
+}
+.camera-screen__oval--ready {
+  border-color: #6ee39b;
+  box-shadow:
+    0 0 0 9999px rgba(0, 0, 0, 0.22),
+    0 0 0 3px rgba(110, 227, 155, 0.35),
+    0 0 24px rgba(110, 227, 155, 0.5);
 }
 
-.camera-guide__oval--ready {
-  border-color: #4caf50;
-}
-
-.capture-guidance-message {
-  text-align: center;
-  font-weight: 600;
-  margin: 0;
-}
-
-.capture-detector-status {
-  text-align: center;
-  color: #666;
-  font-size: 0.9rem;
-  margin: 0;
-}
-
-.quality-checking,
-.quality-retry {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.quality-checking h2,
-.quality-retry h2 {
-  margin: 0;
-}
-
-.quality-retry__reason {
-  margin: 0;
-  font-weight: 600;
-}
-
-.quality-retry__actions {
-  display: flex;
-  gap: 0.75rem;
-  justify-content: center;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-/* VLM experiment panel (M4 §64-69, development builds only). */
-.vlm-experiment {
-  border-top: 1px solid #ddd;
-  padding-top: 0.75rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.vlm-experiment__label {
-  font-weight: 600;
-  margin: 0;
-}
-
-.vlm-experiment__controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-}
-
-.vlm-experiment__controls label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  font-size: 0.9rem;
-}
-
-.vlm-experiment__controls select {
-  min-height: 40px;
-  padding: 0.4rem 0.5rem;
-  border-radius: 0.5rem;
-  border: 1px solid #aaa;
-}
-
-.vlm-experiment__error {
-  color: #b3261e;
-  margin: 0;
-}
-
-.vlm-experiment__result {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0.25rem 1rem;
-  margin: 0;
-}
-
-.vlm-experiment__result dt {
-  font-weight: 600;
-}
-
-.vlm-experiment__result dd {
-  margin: 0;
-}
-
-.capture-progress {
+/* Guidance: prominent, calm, single message, readable over any camera background. */
+.camera-screen__guidance {
   position: absolute;
-  inset: auto 0 0 0;
-  padding: 0.75rem 1rem 1.5rem;
-  background: linear-gradient(transparent, rgba(0, 0, 0, 0.6));
-  color: #fff;
+  left: 50%;
+  bottom: clamp(7rem, 16vh, 10rem);
+  transform: translateX(-50%);
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--lp-space-2);
+  width: 100%;
+  max-width: 480px;
+  padding: 0 var(--lp-space-4);
+  pointer-events: none;
   text-align: center;
 }
 
-.capture-progress p {
-  margin: 0;
-}
-
-.capture-transient-message {
-  color: #7a4f01;
-  background: #fff3cd;
-  border: 1px solid #f0d27a;
-  border-radius: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  max-width: 560px;
-  margin: 0 auto;
-}
-
-.camera-controls,
-.capture-preview__actions,
-.capture-error__actions {
-  display: flex;
-  gap: 0.75rem;
-  justify-content: center;
+.camera-screen__guidance-message {
+  display: inline-flex;
   align-items: center;
-  flex-wrap: wrap;
-}
-
-.capture-preview__image {
-  max-width: 560px;
-  width: 100%;
-  border-radius: 1rem;
-  margin: 0 auto;
-}
-
-button {
-  min-height: 48px;
-  min-width: 48px;
-  padding: 0.6rem 1.25rem;
-  font-size: 1rem;
-  border-radius: 0.75rem;
-  border: 1px solid #0b57d0;
-  background: #fff;
-  color: #0b57d0;
-  cursor: pointer;
-}
-
-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.primary-action {
-  background: #0b57d0;
-  color: #fff;
-  border-color: #0b57d0;
-}
-
-.capture-button {
-  min-width: 9rem;
-}
-
-.capture-confirmed__meta {
-  color: #555;
-  font-size: 0.9rem;
-}
-
-.capture-diagnostics {
-  font-size: 0.85rem;
-  color: #555;
-  border-top: 1px solid #ddd;
-  padding-top: 0.5rem;
-}
-
-.capture-diagnostics dl {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0.25rem 1rem;
-  margin: 0.5rem 0 0;
-}
-
-.capture-diagnostics dt {
-  font-weight: 600;
-}
-
-.capture-diagnostics dd {
+  gap: var(--lp-space-2);
   margin: 0;
+  padding: 0.6rem 1.1rem;
+  border-radius: var(--lp-radius-full);
+  background: rgba(12, 15, 20, 0.55);
+  color: #fff;
+  font-size: var(--lp-font-size-lg);
+  font-weight: var(--lp-font-weight-semibold);
+  animation: lp-guidance-in var(--lp-motion-base) var(--lp-ease-out);
 }
 
-.privacy-note {
-  color: #666;
-  font-size: 0.9rem;
+.camera-screen__sub-status,
+.camera-screen__transient {
+  margin: 0;
+  padding: 0.4rem 0.9rem;
+  border-radius: var(--lp-radius-full);
+  background: rgba(12, 15, 20, 0.45);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: var(--lp-font-size-sm);
 }
 
-/* Respect mobile browser chrome / notches (M2 §55). */
-.capture-page {
-  padding-bottom: max(1rem, env(safe-area-inset-bottom));
-}
-
-@media (min-width: 40rem) {
-  .camera-stage {
-    aspect-ratio: 16 / 9;
+@keyframes lp-guidance-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
-/* Keep the viewport mounted (but invisible) while permission is being requested. */
-.camera-viewport--hidden {
-  display: none;
+/* Hold-still during burst capture (frame counts are never shown). */
+.camera-screen__hold {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--lp-space-3);
+  padding: var(--lp-space-4) var(--lp-space-4) calc(var(--lp-safe-bottom) + var(--lp-space-4));
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.65));
+  color: #fff;
+  font-size: var(--lp-font-size-lg);
+  font-weight: var(--lp-font-weight-semibold);
+}
+
+.camera-screen__hold-dots {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  border-top-color: #fff;
+  animation: lp-spin 0.9s linear infinite;
+}
+
+.camera-screen__sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Bottom controls: central shutter is primary; switch is clearly secondary. */
+.camera-screen__controls {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--lp-space-6);
+  padding: var(--lp-space-4) var(--lp-space-5) calc(var(--lp-safe-bottom) + var(--lp-space-5));
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.55));
+}
+
+.camera-screen__shutter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--lp-space-2);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+.camera-screen__shutter:focus-visible {
+  outline: none;
+}
+.camera-screen__shutter:focus-visible .camera-screen__shutter-inner {
+  box-shadow: var(--lp-focus-ring);
+}
+.camera-screen__shutter:disabled {
+  cursor: not-allowed;
+}
+.camera-screen__shutter-inner {
+  display: block;
+  width: 74px;
+  height: 74px;
+  border-radius: 50%;
+  border: 4px solid #fff;
+  background: rgba(255, 255, 255, 0.18);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+  transition: background-color var(--lp-motion-fast) var(--lp-ease-out);
+}
+.camera-screen__shutter:hover:not(:disabled) .camera-screen__shutter-inner {
+  background: rgba(255, 255, 255, 0.35);
+}
+.camera-screen__shutter:disabled .camera-screen__shutter-inner {
+  opacity: 0.5;
+}
+.camera-screen__shutter-label {
+  color: #fff;
+  font-size: var(--lp-font-size-sm);
+  font-weight: var(--lp-font-weight-semibold);
+}
+
+.camera-screen__switch,
+.camera-screen__switch-slot {
+  width: 56px;
+  height: 56px;
+  flex: 0 0 auto;
+}
+
+.camera-screen__switch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: rgba(12, 15, 20, 0.5);
+  color: #fff;
+  cursor: pointer;
+}
+.camera-screen__switch:hover:not(:disabled) {
+  background: rgba(12, 15, 20, 0.7);
+}
+.camera-screen__switch:focus-visible {
+  outline: none;
+  box-shadow: var(--lp-focus-ring);
+}
+.camera-screen__switch:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Desktop: contained, polished, centered (M5.5 §18, §56). */
+@media (min-width: 40rem) {
+  .camera-screen {
+    width: min(560px, 100%);
+    height: auto;
+    aspect-ratio: 3 / 4;
+    max-height: 88dvh;
+    margin: 0 auto;
+    border-radius: var(--lp-radius-lg);
+  }
+  .camera-screen--hidden {
+    width: 0;
+    height: 0;
+  }
+  .camera-screen__guidance {
+    bottom: clamp(6rem, 12vh, 9rem);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Preparation screen                                                  */
+/* ------------------------------------------------------------------ */
+
+.lp-anim {
+  display: flex;
+  justify-content: center;
+  margin: var(--lp-space-4) 0 var(--lp-space-6);
+}
+
+.lp-anim__scene {
+  transform-origin: 100px 105px;
+}
+
+/* Face guide in the illustration */
+.lp-anim__guide {
+  fill: none;
+  stroke: var(--lp-color-primary);
+  stroke-opacity: 0.25;
+  stroke-width: 3;
+}
+
+.lp-anim__head {
+  fill: #e8ecf2;
+  stroke: #c9d2de;
+  stroke-width: 2;
+}
+.lp-anim__eye {
+  fill: #2a3240;
+}
+.lp-anim__mouth {
+  fill: none;
+  stroke: #2a3240;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+
+.lp-anim__mask {
+  fill: #6b7a90;
+  opacity: 0;
+}
+.lp-anim__mask__fold {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.5);
+  stroke-width: 2;
+}
+
+.lp-anim__glasses {
+  fill: none;
+  stroke: #2a3240;
+  stroke-width: 2.5;
+  opacity: 0;
+}
+
+.lp-anim__check circle {
+  fill: var(--lp-color-success);
+}
+.lp-anim__check path {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.lp-anim__check {
+  opacity: 0;
+}
+
+/* Animation cycle (~12s). Sequence: mask appears -> disappears, glasses appear -> disappear,
+ * face slides to center, check appears. Static end state is also the reduced-motion state. */
+@keyframes lp-mask-cycle {
+  0%,
+  18% {
+    opacity: 0;
+  }
+  26%,
+  42% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes lp-glasses-cycle {
+  0%,
+  50% {
+    opacity: 0;
+  }
+  58%,
+  74% {
+    opacity: 1;
+  }
+  82%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes lp-face-cycle {
+  0%,
+  74% {
+    transform: translateX(-10px);
+  }
+  86%,
+  100% {
+    transform: translateX(0);
+  }
+}
+@keyframes lp-check-cycle {
+  0%,
+  88% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  96%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.lp-anim__mask {
+  animation: lp-mask-cycle 12s var(--lp-ease-out) infinite;
+}
+.lp-anim__glasses {
+  animation: lp-glasses-cycle 12s var(--lp-ease-out) infinite;
+}
+.lp-anim__face {
+  animation: lp-face-cycle 12s var(--lp-ease-out) infinite;
+}
+.lp-anim__check {
+  animation: lp-check-cycle 12s var(--lp-ease-out) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lp-anim__mask,
+  .lp-anim__glasses {
+    display: none;
+  }
+  .lp-anim__face {
+    animation: none;
+    transform: translateX(0);
+  }
+  .lp-anim__check {
+    animation: none;
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.lp-prep-list {
+  list-style: none;
+  margin: 0 0 var(--lp-space-5);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--lp-space-3);
+}
+
+.lp-prep-list__item {
+  display: flex;
+  align-items: center;
+  gap: var(--lp-space-3);
+  font-size: var(--lp-font-size-md);
+  font-weight: var(--lp-font-weight-medium);
+}
+
+.lp-prep-list__check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #e8f5ec;
+  color: var(--lp-color-success);
+}
+
+.lp-prep-footer {
+  text-align: center;
+  margin-bottom: var(--lp-space-4);
+}
+
+.lp-prep-cta {
+  width: 100%;
+}
+
+/* ------------------------------------------------------------------ */
+/* Permission screen                                                   */
+/* ------------------------------------------------------------------ */
+
+.lp-permission {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--lp-space-3);
+  text-align: center;
+}
+
+.lp-permission__icon,
+.lp-retry__icon,
+.lp-error__icon,
+.lp-success__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  border-radius: var(--lp-radius-full);
+  background: #eef3fc;
+  color: var(--lp-color-primary);
+  margin-bottom: var(--lp-space-2);
+}
+
+.lp-permission__cta {
+  width: 100%;
+  margin-top: var(--lp-space-4);
+}
+
+/* ------------------------------------------------------------------ */
+/* Starting / checking screens                                         */
+/* ------------------------------------------------------------------ */
+
+.lp-starting,
+.lp-checking {
+  display: flex;
+  justify-content: center;
+  padding: var(--lp-space-10) 0;
+}
+
+.lp-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--lp-space-3);
+  color: var(--lp-color-text-secondary);
+  font-size: var(--lp-font-size-md);
+  text-align: center;
+}
+
+/* ------------------------------------------------------------------ */
+/* Retry screen                                                        */
+/* ------------------------------------------------------------------ */
+
+.lp-retry {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--lp-space-4);
+  text-align: center;
+}
+
+.lp-retry__actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lp-space-2);
+  width: 100%;
+  margin-top: var(--lp-space-2);
+}
+
+.lp-retry__actions .lp-btn {
+  width: 100%;
+}
+
+/* ------------------------------------------------------------------ */
+/* Review screen                                                       */
+/* ------------------------------------------------------------------ */
+
+.lp-review__image {
+  width: 100%;
+  max-width: 480px;
+  margin: 0 auto var(--lp-space-5);
+  border-radius: var(--lp-radius-lg);
+  box-shadow: var(--lp-shadow-md);
+  display: block;
+}
+
+.lp-review__actions {
+  display: flex;
+  gap: var(--lp-space-3);
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.lp-review__actions .lp-btn {
+  flex: 1 1 0;
+  min-width: 11rem;
+  max-width: 16rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* Success / error screens                                             */
+/* ------------------------------------------------------------------ */
+
+.lp-success {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--lp-space-3);
+  text-align: center;
+  padding-top: var(--lp-space-8);
+}
+
+.lp-success__icon {
+  background: #e8f5ec;
+  color: var(--lp-color-success);
+}
+
+.lp-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--lp-space-4);
+  text-align: center;
+}
+
+.lp-error__icon {
+  background: #fdeceb;
+  color: var(--lp-color-danger);
+}
+
+.lp-error .lp-status {
+  text-align: left;
+  max-width: 480px;
+}
+
+.lp-error__actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lp-space-2);
+  width: 100%;
+  max-width: 360px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Help sheet (non-destructive overlay over the camera)                */
+/* ------------------------------------------------------------------ */
+
+.lp-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.lp-sheet__backdrop {
+  position: absolute;
+  inset: 0;
+  background: var(--lp-color-scrim);
+}
+
+.lp-sheet__panel {
+  position: relative;
+  width: 100%;
+  max-width: 560px;
+  background: var(--lp-color-surface);
+  border-radius: var(--lp-radius-lg) var(--lp-radius-lg) 0 0;
+  padding: var(--lp-space-6) var(--lp-space-5) calc(var(--lp-safe-bottom) + var(--lp-space-5));
+  box-shadow: var(--lp-shadow-lg);
+  animation: lp-sheet-in var(--lp-motion-base) var(--lp-ease-out);
+}
+
+@keyframes lp-sheet-in {
+  from {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@media (min-width: 40rem) {
+  .lp-sheet {
+    align-items: center;
+  }
+  .lp-sheet__panel {
+    border-radius: var(--lp-radius-lg);
+    margin: var(--lp-space-5);
+  }
+}
+
+.lp-sheet__header {
+  display: flex;
+  align-items: center;
+  gap: var(--lp-space-3);
+  margin-bottom: var(--lp-space-4);
+}
+
+.lp-sheet__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: #eef3fc;
+  color: var(--lp-color-primary);
+}
+
+.lp-sheet__title {
+  margin: 0;
+  font-size: var(--lp-font-size-xl);
+  font-weight: var(--lp-font-weight-bold);
+}
+
+.lp-sheet__list {
+  margin: 0 0 var(--lp-space-6);
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--lp-space-3);
+}
+
+.lp-sheet__list li {
+  display: flex;
+  align-items: center;
+  gap: var(--lp-space-3);
+  font-size: var(--lp-font-size-md);
+}
+
+.lp-sheet__list li::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--lp-color-primary);
+  flex: 0 0 auto;
+}
+
+.lp-sheet__close {
+  width: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .camera-screen__guidance-message {
+    animation: none;
+  }
+  .camera-screen__hold-dots {
+    animation: none;
+  }
+  .lp-sheet__panel {
+    animation: none;
+  }
+}
+
+/* Landscape: keep controls compact and usable; never force orientation. */
+@media (orientation: landscape) and (max-height: 30rem) {
+  .camera-screen__guidance {
+    bottom: clamp(4.5rem, 20vh, 6.5rem);
+  }
+  .camera-screen__controls {
+    padding-bottom: calc(var(--lp-safe-bottom) + var(--lp-space-2));
+  }
+  .camera-screen__shutter-inner {
+    width: 56px;
+    height: 56px;
+  }
 }

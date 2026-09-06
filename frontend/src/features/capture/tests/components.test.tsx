@@ -1,47 +1,111 @@
 /**
- * Component tests for the capture UI (M2 §13, §17, §40, §55-59): mirroring, guide, controls,
- * preview, error state, diagnostics. Pure rendering tests; no media required.
+ * Component tests for the M5.5 guided-capture UI: preparation, permission, camera screen, quality
+ * checking, quality retry (reason copy), review, success and error UX. Pure rendering tests; no
+ * media required. M5.5 §93-94.
  */
 
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { CameraErrorState } from '../components/CameraErrorState'
-import { CameraIntroduction } from '../components/CameraIntroduction'
-import { CameraViewport } from '../components/CameraViewport'
-import { CaptureDiagnostics } from '../components/CaptureDiagnostics'
-import { CapturePreview } from '../components/CapturePreview'
-import { QualityChecking } from '../components/QualityChecking'
+import { CameraScreen } from '../components/CameraScreen'
+import { ErrorScreen } from '../components/ErrorScreen'
+import { HelpSheet } from '../components/HelpSheet'
+import { InstructionAnimation } from '../components/InstructionAnimation'
+import { PermissionScreen } from '../components/PermissionScreen'
+import { PreparationScreen } from '../components/PreparationScreen'
+import { QualityCheckingScreen } from '../components/QualityCheckingScreen'
 import { QualityRetryScreen } from '../components/QualityRetryScreen'
+import { ReviewScreen } from '../components/ReviewScreen'
+import { StartingCameraScreen } from '../components/StartingCameraScreen'
+import { SuccessScreen } from '../components/SuccessScreen'
 import { CameraError } from '../media/mediaErrors'
 import { QualityError } from '../quality/errors'
 import { buildLiveGuidance } from '../quality/guidance/guidance'
-import type { CaptureDiagnostics as CaptureDiagnosticsData } from '../types/capture'
-import type { BundleQualityAssessment } from '../quality/types/quality'
 
 function makeVideoRef() {
   return { current: document.createElement('video') }
 }
 
-describe('CameraIntroduction', () => {
-  it('requests camera access only after an explicit user action', () => {
-    const onStart = vi.fn()
-    render(<CameraIntroduction onStart={onStart} pending={false} />)
-    expect(
-      screen.getByRole('heading', { name: /We need access to your camera/i }),
-    ).toBeInTheDocument()
-    const button = screen.getByRole('button', { name: 'Start camera' })
-    button.click()
-    expect(onStart).toHaveBeenCalledTimes(1)
+describe('PreparationScreen', () => {
+  it('shows the preparation title and all four instructions on a fresh visit', () => {
+    render(<PreparationScreen onContinue={vi.fn()} />)
+    expect(screen.getByRole('heading', { name: 'Prepare for your photo' })).toBeInTheDocument()
+    expect(screen.getByText('Remove your mask')).toBeInTheDocument()
+    expect(screen.getByText('Remove spectacles')).toBeInTheDocument()
+    expect(screen.getByText('Keep your face clearly visible')).toBeInTheDocument()
+    expect(screen.getByText('Find a well-lit place')).toBeInTheDocument()
+    expect(screen.getByText('This will only take a few seconds.')).toBeInTheDocument()
   })
 
-  it('disables the button while permission is being requested', () => {
-    render(<CameraIntroduction onStart={vi.fn()} pending />)
-    expect(screen.getByRole('button', { name: 'Requesting camera access…' })).toBeDisabled()
+  it('does not show camera or liveness instructions before Continue', () => {
+    render(<PreparationScreen onContinue={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: 'Open camera' })).not.toBeInTheDocument()
+    const body = document.body.textContent ?? ''
+    expect(body).not.toMatch(/liveness|PAD|MediaPipe|VLM/i)
+  })
+
+  it('fires Continue only on an explicit action', () => {
+    const onContinue = vi.fn()
+    render(<PreparationScreen onContinue={onContinue} />)
+    screen.getByRole('button', { name: 'Continue' }).click()
+    expect(onContinue).toHaveBeenCalledTimes(1)
+  })
+
+  it('never auto-requests camera access', () => {
+    const { unmount } = render(<PreparationScreen onContinue={vi.fn()} />)
+    expect(screen.queryByTestId('camera-video')).not.toBeInTheDocument()
+    unmount()
   })
 })
 
-describe('CameraViewport', () => {
+describe('InstructionAnimation', () => {
+  it('communicates the instruction content without requiring animation', () => {
+    render(<InstructionAnimation />)
+    expect(screen.getByRole('img', { name: /remove your mask/i })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: /remove your spectacles/i })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: /centered and clearly visible/i })).toBeInTheDocument()
+  })
+
+  it('does not block the Continue action', () => {
+    render(<PreparationScreen onContinue={vi.fn()} />)
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled()
+  })
+})
+
+describe('PermissionScreen', () => {
+  it('explains camera access before invoking getUserMedia', () => {
+    const onOpen = vi.fn()
+    render(<PermissionScreen onOpenCamera={onOpen} onBack={vi.fn()} />)
+    expect(screen.getByRole('heading', { name: 'Camera access' })).toBeInTheDocument()
+    expect(screen.getByText('We need camera access to capture your photo.')).toBeInTheDocument()
+    expect(screen.getByText('Your microphone will not be used.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Open camera' })).toBeInTheDocument()
+  })
+
+  it('calls the camera flow only when Open camera is pressed', () => {
+    const onOpen = vi.fn()
+    render(<PermissionScreen onOpenCamera={onOpen} onBack={vi.fn()} />)
+    expect(onOpen).not.toHaveBeenCalled()
+    screen.getByRole('button', { name: 'Open camera' }).click()
+    expect(onOpen).toHaveBeenCalledTimes(1)
+  })
+
+  it('backs to preparation', () => {
+    const onBack = vi.fn()
+    render(<PermissionScreen onOpenCamera={vi.fn()} onBack={onBack} />)
+    screen.getByRole('button', { name: 'Back' }).click()
+    expect(onBack).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('StartingCameraScreen', () => {
+  it('announces the pending permission state', () => {
+    render(<StartingCameraScreen />)
+    expect(screen.getByRole('status')).toHaveTextContent('Starting camera…')
+  })
+})
+
+describe('CameraScreen', () => {
   const baseProps = {
     videoRef: makeVideoRef(),
     isFrontCamera: true,
@@ -52,212 +116,251 @@ describe('CameraViewport', () => {
     transientMessage: null,
     onSwitchCamera: vi.fn(),
     onCapture: vi.fn(),
+    onBack: vi.fn(),
+    onHelp: vi.fn(),
   }
 
   it('mirrors the front-camera preview visually only', () => {
-    const { container } = render(<CameraViewport {...baseProps} isFrontCamera />)
-    const video = container.querySelector('.camera-video') as HTMLElement
-    expect(video).toHaveClass('camera-video--mirror')
+    const { container } = render(<CameraScreen {...baseProps} isFrontCamera />)
+    const video = container.querySelector('.camera-screen__video') as HTMLElement
+    expect(video).toHaveClass('camera-screen__video--mirror')
   })
 
   it('does not mirror the rear-camera preview', () => {
-    const { container } = render(<CameraViewport {...baseProps} isFrontCamera={false} />)
-    expect(container.querySelector('.camera-video--mirror')).toBeNull()
+    const { container } = render(<CameraScreen {...baseProps} isFrontCamera={false} />)
+    expect(container.querySelector('.camera-screen__video--mirror')).toBeNull()
   })
 
   it('renders the decorative face guide and a stable video element', () => {
-    render(<CameraViewport {...baseProps} />)
+    render(<CameraScreen {...baseProps} />)
     expect(screen.getByTestId('camera-video')).toBeInTheDocument()
-    expect(document.querySelector('.camera-guide__oval')).not.toBeNull()
+    expect(document.querySelector('.camera-screen__oval')).not.toBeNull()
   })
 
-  it('keeps the video mounted (hidden) while permission is requested', () => {
-    const { container } = render(<CameraViewport {...baseProps} hidden />)
-    expect(container.querySelector('.camera-viewport--hidden')).not.toBeNull()
+  it('keeps the video mounted (hidden) while permission is pending', () => {
+    const { container } = render(<CameraScreen {...baseProps} hidden />)
+    expect(container.querySelector('.camera-screen--hidden')).not.toBeNull()
     expect(screen.getByTestId('camera-video')).toBeInTheDocument()
   })
 
   it('hides the switch button when switching is unavailable', () => {
-    render(<CameraViewport {...baseProps} canSwitchCamera={false} />)
+    render(<CameraScreen {...baseProps} canSwitchCamera={false} />)
     expect(screen.queryByRole('button', { name: 'Switch camera' })).not.toBeInTheDocument()
   })
 
-  it('shows the switch button and disables controls while capturing', () => {
-    render(<CameraViewport {...baseProps} canSwitchCamera isCapturing />)
+  it('shows switch and capture, disabling both while capturing', () => {
+    render(<CameraScreen {...baseProps} canSwitchCamera isCapturing />)
     expect(screen.getByRole('button', { name: 'Switch camera' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Capture photo' })).toBeDisabled()
-    expect(screen.getByRole('status')).toHaveTextContent('Hold still')
+    expect(screen.getAllByRole('status').some((el) => el.textContent?.includes('Hold still'))).toBe(
+      true,
+    )
+    // No engineering frame details on the customer path.
+    const body = document.body.textContent ?? ''
+    expect(body).not.toMatch(/Capturing frame|1\/8|burst/i)
   })
 
-  it('shows a recoverable transient message without destroying the flow', () => {
-    render(<CameraViewport {...baseProps} transientMessage="We couldn't switch cameras." />)
-    expect(screen.getByRole('status')).toHaveTextContent("We couldn't switch cameras.")
+  it('shows the guidance message and marks the guide needs_attention', () => {
+    const { container } = render(
+      <CameraScreen {...baseProps} guidance={buildLiveGuidance('TOO_FAR')} />,
+    )
+    expect(screen.getByRole('status')).toHaveTextContent('Move closer to the camera.')
+    expect(container.querySelector('.camera-screen__oval--needs_attention')).not.toBeNull()
+  })
+
+  it('marks the guide ready with a check, without liveness wording', () => {
+    const { container } = render(
+      <CameraScreen {...baseProps} guidance={buildLiveGuidance('READY')} />,
+    )
+    expect(screen.getByRole('status')).toHaveTextContent('Ready to capture')
+    expect(container.querySelector('.camera-screen__oval--ready')).not.toBeNull()
+    const body = document.body.textContent ?? ''
+    expect(body).not.toMatch(/Live detected|Verified|Genuine|Safe/i)
+  })
+
+  it('shows detector preparation status', () => {
+    render(<CameraScreen {...baseProps} detectorStatus="LOADING" />)
+    expect(screen.getByText('Preparing quality check…')).toBeInTheDocument()
+  })
+
+  it('provides back and help affordances during capture', () => {
+    const onBack = vi.fn()
+    const onHelp = vi.fn()
+    render(<CameraScreen {...baseProps} onBack={onBack} onHelp={onHelp} />)
+    screen.getByRole('button', { name: 'Back' }).click()
+    screen.getByRole('button', { name: 'Help' }).click()
+    expect(onBack).toHaveBeenCalledTimes(1)
+    expect(onHelp).toHaveBeenCalledTimes(1)
   })
 })
 
-describe('CapturePreview', () => {
-  it('renders the preview image and retake/use actions', () => {
-    render(<CapturePreview previewUrl="blob:fake-1" onRetake={vi.fn()} onConfirm={vi.fn()} />)
-    expect(screen.getByRole('img', { name: 'Your captured photo preview' })).toHaveAttribute(
-      'src',
-      'blob:fake-1',
-    )
-    expect(screen.getByRole('button', { name: 'Retake photo' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Use photo' })).toBeInTheDocument()
-  })
-})
-
-describe('CameraErrorState', () => {
-  it('shows a safe customer message, never a raw browser message', () => {
-    const error = new CameraError('CAMERA_PERMISSION_DENIED', 'NotAllowedError')
-    render(
-      <CameraErrorState
-        error={error}
-        canRetryStream={false}
-        onRetryStream={vi.fn()}
-        onRestart={vi.fn()}
-        onReset={vi.fn()}
-      />,
-    )
-    expect(screen.getByRole('alert')).toHaveTextContent(error.safeMessage)
-    expect(screen.queryByText('NotAllowedError')).not.toBeInTheDocument()
-  })
-
-  it('offers "Try again" that resumes the stream when the camera is still active', () => {
-    const onRetryStream = vi.fn()
-    render(
-      <CameraErrorState
-        error={new CameraError('INSUFFICIENT_FRAMES')}
-        canRetryStream
-        onRetryStream={onRetryStream}
-        onRestart={vi.fn()}
-        onReset={vi.fn()}
-      />,
-    )
-    screen.getByRole('button', { name: 'Try again' }).click()
-    expect(onRetryStream).toHaveBeenCalledTimes(1)
-  })
-
-  it('uses a quality heading for quality-analysis failures, never a camera message', () => {
-    render(
-      <CameraErrorState
-        error={new QualityError('QUALITY_ANALYSIS_ERROR')}
-        canRetryStream={false}
-        onRetryStream={vi.fn()}
-        onRestart={vi.fn()}
-        onReset={vi.fn()}
-      />,
-    )
-    expect(
-      screen.getByRole('heading', { name: "We couldn't check photo quality." }),
-    ).toBeInTheDocument()
-    expect(screen.getByRole('alert')).toHaveTextContent('check photo quality')
-  })
-})
-
-describe('QualityChecking', () => {
+describe('QualityCheckingScreen', () => {
   it('shows acquisition-quality progress without model jargon or percentages', () => {
-    render(<QualityChecking />)
-    expect(screen.getByRole('heading', { name: 'Checking photo quality…' })).toBeInTheDocument()
+    render(<QualityCheckingScreen />)
+    expect(screen.getByRole('status')).toHaveTextContent('Checking photo quality…')
     expect(screen.queryByText(/%/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/MediaPipe|sharpness|confidence/i)).not.toBeInTheDocument()
   })
 })
 
 describe('QualityRetryScreen', () => {
-  it('shows one prioritized reason and retake/back actions', () => {
-    const onRetake = vi.fn()
+  it('maps NO_FACE to friendly copy and never exposes the raw code', () => {
+    render(<QualityRetryScreen reasonCodes={['NO_FACE']} onRetake={vi.fn()} onReset={vi.fn()} />)
+    expect(screen.getByRole('heading', { name: "Let's try again" })).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent("We couldn't see your face clearly.")
+    expect(screen.getByRole('alert')).toHaveTextContent('Position your face inside the guide.')
+    expect(screen.queryByText('NO_FACE')).not.toBeInTheDocument()
+  })
+
+  it('maps UNDEREXPOSED to a lighting action', () => {
+    render(
+      <QualityRetryScreen reasonCodes={['UNDEREXPOSED']} onRetake={vi.fn()} onReset={vi.fn()} />,
+    )
+    expect(screen.getByRole('alert')).toHaveTextContent('Move to a brighter place.')
+  })
+
+  it('maps BLURRED to a steady-device action', () => {
+    render(<QualityRetryScreen reasonCodes={['BLURRED']} onRetake={vi.fn()} onReset={vi.fn()} />)
+    expect(screen.getByRole('alert')).toHaveTextContent('Hold your device steady and try again.')
+  })
+
+  it('maps MULTIPLE_FACES to a single-person action', () => {
+    render(
+      <QualityRetryScreen reasonCodes={['MULTIPLE_FACES']} onRetake={vi.fn()} onReset={vi.fn()} />,
+    )
+    expect(screen.getByRole('alert')).toHaveTextContent('Make sure only one person is visible.')
+  })
+
+  it('falls back to a generic retake message for unknown failures', () => {
     render(
       <QualityRetryScreen
-        guidance={buildLiveGuidance('TOO_FAR')}
-        onRetake={onRetake}
+        reasonCodes={['QUALITY_ANALYSIS_ERROR']}
+        onRetake={vi.fn()}
         onReset={vi.fn()}
       />,
     )
-    expect(screen.getByRole('heading', { name: 'Photo needs to be retaken.' })).toBeInTheDocument()
-    expect(screen.getByRole('alert')).toHaveTextContent('Move closer to the camera.')
-    screen.getByRole('button', { name: 'Retake photo' }).click()
+    expect(screen.getByRole('alert')).toHaveTextContent("Let's try that photo again.")
+    expect(screen.queryByText('QUALITY_ANALYSIS_ERROR')).not.toBeInTheDocument()
+  })
+
+  it('fires Try again and Back to start', () => {
+    const onRetake = vi.fn()
+    const onReset = vi.fn()
+    render(<QualityRetryScreen reasonCodes={['BLURRED']} onRetake={onRetake} onReset={onReset} />)
+    screen.getByRole('button', { name: 'Try again' }).click()
+    screen.getByRole('button', { name: 'Back to start' }).click()
     expect(onRetake).toHaveBeenCalledTimes(1)
+    expect(onReset).toHaveBeenCalledTimes(1)
   })
 })
 
-describe('CameraViewport guidance', () => {
-  const baseProps = {
-    videoRef: makeVideoRef(),
-    isFrontCamera: true,
-    canSwitchCamera: false,
-    isCapturing: false,
-    isSwitching: false,
-    captureProgress: null,
-    transientMessage: null,
-    onSwitchCamera: vi.fn(),
-    onCapture: vi.fn(),
-  }
-
-  it('shows the guidance message and marks the guide state', () => {
-    const { container } = render(
-      <CameraViewport {...baseProps} guidance={buildLiveGuidance('TOO_FAR')} />,
+describe('ReviewScreen', () => {
+  it('renders the preview image with retake (secondary) and use-photo (primary) actions', () => {
+    const onRetake = vi.fn()
+    const onUse = vi.fn()
+    render(<ReviewScreen previewUrl="blob:fake-1" onRetake={onRetake} onUsePhoto={onUse} />)
+    expect(screen.getByRole('img', { name: 'Your captured photo preview' })).toHaveAttribute(
+      'src',
+      'blob:fake-1',
     )
-    expect(screen.getByRole('status')).toHaveTextContent('Move closer to the camera.')
-    expect(container.querySelector('.camera-guide__oval--guidance')).not.toBeNull()
+    const retake = screen.getByRole('button', { name: 'Retake photo' })
+    const use = screen.getByRole('button', { name: 'Use photo' })
+    expect(retake).toHaveClass('lp-btn--secondary')
+    expect(use).toHaveClass('lp-btn--primary')
+    retake.click()
+    use.click()
+    expect(onRetake).toHaveBeenCalledTimes(1)
+    expect(onUse).toHaveBeenCalledTimes(1)
   })
+})
 
-  it('marks the guide ready without relying on color alone', () => {
-    const { container } = render(
-      <CameraViewport {...baseProps} guidance={buildLiveGuidance('READY')} />,
+describe('SuccessScreen', () => {
+  it('uses capture-success wording only', () => {
+    render(<SuccessScreen onStartOver={vi.fn()} />)
+    expect(screen.getByRole('heading', { name: 'Photo captured successfully' })).toBeInTheDocument()
+    expect(screen.getByText('Your photo is ready.')).toBeInTheDocument()
+    const body = document.body.textContent ?? ''
+    expect(body).not.toMatch(/verified|Liveness|passed|fraud|identity/i)
+  })
+})
+
+describe('ErrorScreen', () => {
+  it('separates camera-permission UX from quality UX', () => {
+    render(
+      <ErrorScreen
+        error={new CameraError('CAMERA_PERMISSION_DENIED', 'NotAllowedError')}
+        onRetry={vi.fn()}
+        onReset={vi.fn()}
+      />,
     )
-    expect(screen.getByRole('status')).toHaveTextContent('Ready to capture.')
-    expect(container.querySelector('.camera-guide__oval--ready')).not.toBeNull()
+    expect(screen.getByRole('heading', { name: 'Camera access is blocked' })).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('Allow camera permission')
+    expect(screen.queryByText('NotAllowedError')).not.toBeInTheDocument()
   })
 
-  it('shows detector preparation status', () => {
-    render(<CameraViewport {...baseProps} detectorStatus="LOADING" />)
-    expect(screen.getByRole('status')).toHaveTextContent('Preparing quality check…')
+  it('maps camera-busy to a close-other-apps message', () => {
+    render(
+      <ErrorScreen
+        error={new CameraError('CAMERA_IN_USE_OR_UNREADABLE', 'NotReadableError')}
+        onRetry={vi.fn()}
+        onReset={vi.fn()}
+      />,
+    )
+    expect(
+      screen.getByRole('heading', { name: 'Camera is being used by another app' }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('Close other apps')
+  })
+
+  it('maps unsupported browsers without DOMException terminology', () => {
+    render(
+      <ErrorScreen
+        error={new CameraError('CAMERA_API_UNAVAILABLE')}
+        onRetry={vi.fn()}
+        onReset={vi.fn()}
+      />,
+    )
+    expect(
+      screen.getByRole('heading', { name: "Camera isn't available in this browser" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText(/DOMException|NotFoundError|NotAllowedError/i),
+    ).not.toBeInTheDocument()
+  })
+
+  it('keeps quality-analysis failures technically distinct from camera failures', () => {
+    render(
+      <ErrorScreen
+        error={new QualityError('QUALITY_ANALYSIS_ERROR')}
+        onRetry={vi.fn()}
+        onReset={vi.fn()}
+      />,
+    )
+    expect(
+      screen.getByRole('heading', { name: 'Something went wrong while checking your photo' }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('Please try again.')
+    expect(screen.queryByText('QUALITY_ANALYSIS_ERROR')).not.toBeInTheDocument()
   })
 })
 
-describe('CaptureDiagnostics quality', () => {
-  it('renders quality metrics without image data', () => {
-    const bundle = {
-      captureId: 'c1',
-      captureConfigVersion: 'capture-v1',
-      qualityConfigVersion: 'quality-v1',
-      frames: [],
-      eligibleFrameIds: [],
-      selectedFrameId: 'f1',
-      selectionAlgorithmVersion: 'frame-ranking-v1',
-      disposition: 'QUALITY_READY',
-      reasonCodes: [],
-      totalAnalysisTimeMs: 12,
-    } as unknown as BundleQualityAssessment
-    render(<CaptureDiagnostics diagnostics={null} quality={{ bundle }} />)
-    expect(screen.getByTestId('capture-diagnostics')).toBeInTheDocument()
-    expect(screen.getByText('QUALITY_READY')).toBeInTheDocument()
-    expect(screen.queryByText(/blob:|base64|pixels/i)).not.toBeInTheDocument()
-  })
-})
-
-describe('CaptureDiagnostics', () => {
-  it('renders non-sensitive capture timing/size data in development', () => {
-    const diagnostics: CaptureDiagnosticsData = {
-      cameraStartMs: 120,
-      burstDurationMs: 1400,
-      totalFlowMs: 1900,
-      frameCount: 8,
-      totalBytes: 4096,
-      width: 1280,
-      height: 720,
-      frameRate: 30,
-      facingMode: 'user',
-      scheduler: 'rvf',
-    }
-    render(<CaptureDiagnostics diagnostics={diagnostics} />)
-    expect(screen.getByTestId('capture-diagnostics')).toBeInTheDocument()
-    expect(screen.getByText(/1280x720 @ 30fps/)).toBeInTheDocument()
-    expect(screen.queryByText(/deviceId|groupId/i)).not.toBeInTheDocument()
+describe('HelpSheet', () => {
+  it('lists non-technical help items and closes', () => {
+    const onClose = vi.fn()
+    render(<HelpSheet onClose={onClose} />)
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByText('Remove your mask')).toBeInTheDocument()
+    expect(screen.getByText('Keep only one person visible')).toBeInTheDocument()
+    expect(screen.queryByText(/PAD|liveness|VLM/i)).not.toBeInTheDocument()
+    screen.getByRole('button', { name: 'Close' }).click()
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  it('renders nothing when there is no diagnostics data', () => {
-    const { container } = render(<CaptureDiagnostics diagnostics={null} />)
-    expect(container).toBeEmptyDOMElement()
+  it('closes on Escape without touching the camera lifecycle', () => {
+    const onClose = vi.fn()
+    const { unmount } = render(<HelpSheet onClose={onClose} />)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+    unmount()
   })
 })

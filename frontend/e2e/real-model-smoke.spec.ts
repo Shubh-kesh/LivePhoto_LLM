@@ -28,7 +28,8 @@ test('real MediaPipe model initializes and detects on a synthetic frame', async 
   console.log('REAL_MODEL_MANIFEST:', JSON.stringify(manifest.model))
 
   await page.goto('/capture')
-  await page.getByRole('button', { name: 'Start camera' }).click()
+  await page.getByRole('button', { name: 'Continue' }).click()
+  await page.getByRole('button', { name: 'Open camera' }).click()
 
   // Detector initializes (model + WASM load from the LivePhoto origin). If initialization fails,
   // the UI shows "Quality check is unavailable." Instead, live guidance (NO_FACE on the synthetic
@@ -56,15 +57,8 @@ test('real MediaPipe model initializes and detects on a synthetic frame', async 
   // Capture -> quality analysis with the real detector -> quality retry (no face in synthetic
   // checkerboard) -> bundle analysis time = real inference latency evidence.
   await page.getByRole('button', { name: 'Capture photo' }).click()
-  await expect(page.getByRole('heading', { name: 'Photo needs to be retaken.' })).toBeVisible({
+  await expect(page.getByRole('heading', { name: "Let's try again" })).toBeVisible({
     timeout: 30_000,
   })
-  const diagnostics = await page
-    .locator('.capture-diagnostics')
-    .textContent()
-    .catch(() => null)
-  console.log(
-    'REAL_MODEL_DIAGNOSTICS:',
-    diagnostics ? diagnostics.replace(/\s+/g, ' ').trim() : null,
-  )
+  console.log('REAL_MODEL_DIAGNOSTICS: (dev diagnostics removed from the customer path)')
 })

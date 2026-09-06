@@ -1,31 +1,48 @@
 /**
- * Quality retry screen (M3 §62-63). Shows a single prioritized reason and retake/back actions.
- * Quality retry is capture-quality language only — never liveness language.
+ * Quality-retry screen (M5.5 §31-32, §76-77). Reason codes are mapped to customer copy via
+ * copy.ts; raw codes and technical diagnostics are never shown.
  */
 
-import type { LiveGuidance } from '../quality/guidance/guidance'
+import {
+  Button,
+  IconWarning,
+  ProgressSteps,
+  ScreenLayout,
+  StatusMessage,
+} from '../../../design-system'
+import type { QualityReasonCode } from '../quality/types/quality'
+import { captureCopy, retryCopyForReasonCodes } from '../copy'
 
 interface QualityRetryScreenProps {
-  guidance: LiveGuidance | null
+  reasonCodes: readonly QualityReasonCode[]
   onRetake: () => void
   onReset: () => void
 }
 
-export function QualityRetryScreen({ guidance, onRetake, onReset }: QualityRetryScreenProps) {
+export function QualityRetryScreen({ reasonCodes, onRetake, onReset }: QualityRetryScreenProps) {
+  const copy = retryCopyForReasonCodes(reasonCodes)
   return (
-    <section className="quality-retry" aria-labelledby="quality-retry-heading">
-      <h2 id="quality-retry-heading">Photo needs to be retaken.</h2>
-      <p className="quality-retry__reason" role="alert">
-        {guidance?.message ?? 'Please try again.'}
-      </p>
-      <div className="quality-retry__actions">
-        <button type="button" className="primary-action" onClick={onRetake}>
-          Retake photo
-        </button>
-        <button type="button" className="camera-control" onClick={onReset}>
-          Back to start
-        </button>
+    <ScreenLayout>
+      <ProgressSteps active="capture" />
+      <div className="lp-retry" data-testid="quality-retry">
+        <div className="lp-retry__icon" aria-hidden="true">
+          <IconWarning width={40} height={40} />
+        </div>
+        <h1 className="lp-title">{captureCopy.qualityRetry.title}</h1>
+        <StatusMessage variant="warning" role="alert">
+          <span>
+            <strong>{copy.title}</strong> {copy.body}
+          </span>
+        </StatusMessage>
+        <div className="lp-retry__actions">
+          <Button variant="primary" size="lg" onClick={onRetake}>
+            {captureCopy.qualityRetry.tryAgain}
+          </Button>
+          <Button variant="ghost" onClick={onReset}>
+            {captureCopy.qualityRetry.backToStart}
+          </Button>
+        </div>
       </div>
-    </section>
+    </ScreenLayout>
   )
 }

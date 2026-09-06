@@ -1,18 +1,29 @@
 /**
- * Capture page (M2 §1, §45, §55-59 + M3 §60-68). Wires the capture flow into a responsive,
- * accessible UI with live quality guidance, quality analysis and quality-retry states.
- * No liveness language is ever shown.
+ * Capture page — M5.5 banking-grade guided capture UX.
+ *
+ * Composes the M5.5 presentation journey (preparation -> permission explanation -> camera ->
+ * quality -> review -> success) on top of the existing M2/M3 capture-flow state machine. The
+ * state machine remains authoritative; presentation stages are derived from `flow.state` plus a
+ * small two-step pre-camera stage. No liveness language is ever shown, and no biometric/capture
+ * state is persisted (a reload returns to preparation).
+ *
+ * The CameraScreen (with the stable <video>) is always rendered as the first child so the video
+ * node never unmounts across phase transitions (M2 §12, M3 §60). Overlay screens cover it; the
+ * video stays hidden (stream still attached) through permission/analysis/retry phases.
  */
 
 import { useCallback, useState } from 'react'
 
-import { CameraErrorState } from './components/CameraErrorState'
-import { CameraIntroduction } from './components/CameraIntroduction'
-import { CameraViewport } from './components/CameraViewport'
-import { CaptureDiagnostics } from './components/CaptureDiagnostics'
-import { CapturePreview } from './components/CapturePreview'
-import { QualityChecking } from './components/QualityChecking'
+import { CameraScreen } from './components/CameraScreen'
+import { ErrorScreen } from './components/ErrorScreen'
+import { HelpSheet } from './components/HelpSheet'
+import { PermissionScreen } from './components/PermissionScreen'
+import { PreparationScreen } from './components/PreparationScreen'
+import { QualityCheckingScreen } from './components/QualityCheckingScreen'
 import { QualityRetryScreen } from './components/QualityRetryScreen'
+import { ReviewScreen } from './components/ReviewScreen'
+import { StartingCameraScreen } from './components/StartingCameraScreen'
+import { SuccessScreen } from './components/SuccessScreen'
 import { useCaptureFlow, type UseCaptureFlowResult } from './hooks/useCaptureFlow'
 import { VlmExperimentPanel } from '../experiment/VlmExperimentPanel'
 import type { CaptureBundle } from './types/capture'
@@ -20,13 +31,20 @@ import type { FaceDetectorProvider } from './quality/face/FaceDetectorProvider'
 import type { BundleQualityAssessment } from './quality/types/quality'
 import './capture.css'
 
+type PreCameraStage = 'prepare' | 'permission'
+
 export function CapturePage({
   faceDetector,
   analyzeBundle,
+  experiment = false,
 }: {
   faceDetector?: FaceDetectorProvider
   analyzeBundle?: (bundle: CaptureBundle) => Promise<BundleQualityAssessment>
+  /** Development-only: render the VLM experiment panel (never shown on the customer path). */
+  experiment?: boolean
 }) {
+  const [stage, setStage] = useState<PreCameraStage>('prepare')
+  const [helpOpen, setHelpOpen] = useState(false)
   const [confirmedBundle, setConfirmedBundle] = useState<CaptureBundle | null>(null)
   const onBundleReady = useCallback((bundle: CaptureBundle) => {
     setConfirmedBundle(bundle)
@@ -34,99 +52,105 @@ export function CapturePage({
 
   const flow = useCaptureFlow({ onBundleReady, faceDetector, analyzeBundle })
   const isFrontCamera = flow.cameraSettings.facingMode !== 'environment'
-  // Keep the single stable <video> mounted for every phase where the camera session may be alive
-  // so the attached stream survives phase transitions (M2 §12, M3 §60).
-  const activeCameraPhases = [
-    'requestingPermission',
-    'streaming',
-    'switchingCamera',
-    'capturing',
-    'analyzing',
-    'qualityRetry',
-  ] as const
-  const isActiveCameraPhase = activeCameraPhases.includes(
-    flow.state as (typeof activeCameraPhases)[number],
+  const resetToPreparation = useCallback(() => {
+    flow.reset()
+    setStage('prepare')
+    setHelpOpen(false)
+  }, [flow])
+
+  const cameraVisible = ['streaming', 'switchingCamera', 'capturing'].includes(flow.state)
+  const cameraScreen = (
+    <CameraScreen
+      videoRef={flow.videoRef}
+      isFrontCamera={isFrontCamera}
+      canSwitchCamera={flow.canSwitchCamera}
+      isCapturing={flow.state === 'capturing'}
+      isSwitching={flow.state === 'switchingCamera'}
+      captureProgress={flow.captureProgress}
+      transientMessage={flow.transientMessage}
+      guidance={flow.liveGuidance}
+      detectorStatus={flow.detectorState}
+      hidden={!cameraVisible}
+      onSwitchCamera={() => void flow.switchCamera()}
+      onCapture={() => void flow.capture()}
+      onBack={resetToPreparation}
+      onHelp={() => setHelpOpen(true)}
+    />
   )
 
-  return (
-    <main className="capture-page">
-      <h1>LivePhoto</h1>
-
-      {(flow.state === 'idle' || flow.state === 'requestingPermission') && (
-        <CameraIntroduction
-          onStart={() => void flow.startCamera()}
-          pending={flow.state === 'requestingPermission'}
-        />
-      )}
-
-      {isActiveCameraPhase && (
-        <CameraViewport
-          videoRef={flow.videoRef}
-          isFrontCamera={isFrontCamera}
-          canSwitchCamera={flow.canSwitchCamera}
-          isCapturing={flow.state === 'capturing'}
-          isSwitching={flow.state === 'switchingCamera'}
-          captureProgress={flow.captureProgress}
-          transientMessage={flow.transientMessage}
-          guidance={flow.liveGuidance}
-          detectorStatus={flow.detectorState}
-          hidden={flow.state === 'requestingPermission'}
-          onSwitchCamera={() => void flow.switchCamera()}
-          onCapture={() => void flow.capture()}
-        />
-      )}
-
-      {flow.state === 'analyzing' && <QualityChecking />}
-
-      {flow.state === 'qualityRetry' && (
+  let content: React.ReactNode = null
+  switch (flow.state) {
+    case 'idle':
+      content =
+        stage === 'prepare' ? (
+          <PreparationScreen onContinue={() => setStage('permission')} />
+        ) : (
+          <PermissionScreen
+            onOpenCamera={() => void flow.startCamera()}
+            onBack={() => setStage('prepare')}
+          />
+        )
+      break
+    case 'requestingPermission':
+      content = <StartingCameraScreen />
+      break
+    case 'streaming':
+    case 'switchingCamera':
+    case 'capturing':
+      content = null
+      break
+    case 'analyzing':
+      content = <QualityCheckingScreen />
+      break
+    case 'qualityRetry':
+      content = (
         <QualityRetryScreen
-          guidance={flow.retryGuidance}
+          reasonCodes={flow.qualityAssessment?.reasonCodes ?? []}
           onRetake={() => void flow.retryRetake()}
-          onReset={flow.reset}
+          onReset={resetToPreparation}
         />
-      )}
-
-      {flow.state === 'preview' && flow.previewUrl && (
+      )
+      break
+    case 'preview':
+      content = flow.previewUrl ? (
         <>
-          <CapturePreview
+          <ReviewScreen
             previewUrl={flow.previewUrl}
             onRetake={() => void flow.retake()}
-            onConfirm={flow.confirm}
+            onUsePhoto={flow.confirm}
           />
-          {import.meta.env.DEV && flow.bundle && (
+          {experiment && import.meta.env.DEV && flow.bundle && (
             <VlmExperimentPanel bundle={flow.bundle} quality={flow.qualityAssessment} />
           )}
         </>
-      )}
-
-      {flow.state === 'confirmed' && (
-        <section className="capture-confirmed" aria-labelledby="capture-confirmed-heading">
-          <h2 id="capture-confirmed-heading">Photo captured successfully.</h2>
-          {import.meta.env.DEV && confirmedBundle && (
-            <p className="capture-confirmed__meta">
-              Bundle ready for the next pipeline stage (frames: {confirmedBundle.frames.length}).
-            </p>
+      ) : null
+      break
+    case 'confirmed':
+      content = (
+        <>
+          <SuccessScreen onStartOver={resetToPreparation} />
+          {experiment && import.meta.env.DEV && confirmedBundle && (
+            <VlmExperimentPanel bundle={confirmedBundle} quality={flow.qualityAssessment} />
           )}
-          <button type="button" className="camera-control" onClick={flow.reset}>
-            Start over
-          </button>
-        </section>
-      )}
-
-      {flow.state === 'error' && flow.error && (
-        <CameraErrorState
+        </>
+      )
+      break
+    case 'error':
+      content = flow.error ? (
+        <ErrorScreen
           error={flow.error}
-          canRetryStream={flow.canRetryStream}
-          onRetryStream={flow.resumeStream}
-          onRestart={() => void flow.startCamera()}
-          onReset={flow.reset}
+          onRetry={flow.canRetryStream ? flow.resumeStream : () => void flow.startCamera()}
+          onReset={resetToPreparation}
         />
-      )}
+      ) : null
+      break
+  }
 
-      <CaptureDiagnostics
-        diagnostics={flow.diagnostics}
-        quality={{ bundle: flow.qualityAssessment }}
-      />
+  return (
+    <main className="capture-page">
+      {cameraScreen}
+      {content}
+      {helpOpen && cameraVisible && <HelpSheet onClose={() => setHelpOpen(false)} />}
     </main>
   )
 }

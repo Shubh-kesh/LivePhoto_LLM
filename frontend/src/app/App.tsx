@@ -14,6 +14,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/capture" element={<CapturePage />} />
+          <Route path="/dev/vlm-experiment" element={<CapturePage experiment />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </QueryClientProvider>

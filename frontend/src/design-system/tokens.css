@@ -1,0 +1,80 @@
+/* LivePhoto design tokens (M5.5 §43-47). Centralized so a future bank brand can be supplied
+ * without touching capture/security logic (see docs/BRANDING_INTEGRATION.md). */
+
+:root {
+  /* Color — semantic */
+  --lp-color-primary: #0b57d0;
+  --lp-color-primary-hover: #0a4cb5;
+  --lp-color-primary-active: #09429e;
+  --lp-color-primary-contrast: #ffffff;
+  --lp-color-background: #f6f7f9;
+  --lp-color-surface: #ffffff;
+  --lp-color-text: #1c1f24;
+  --lp-color-text-secondary: #5f6672;
+  --lp-color-success: #188038;
+  --lp-color-warning: #9a6b00;
+  --lp-color-danger: #b3261e;
+  --lp-color-border: #e2e5ea;
+  --lp-color-focus: #0b57d0;
+  --lp-color-overlay: rgba(20, 24, 32, 0.6);
+  --lp-color-scrim: rgba(12, 15, 20, 0.55);
+
+  /* Radius */
+  --lp-radius-sm: 8px;
+  --lp-radius-md: 12px;
+  --lp-radius-lg: 16px;
+  --lp-radius-full: 999px;
+
+  /* Spacing */
+  --lp-space-1: 4px;
+  --lp-space-2: 8px;
+  --lp-space-3: 12px;
+  --lp-space-4: 16px;
+  --lp-space-5: 20px;
+  --lp-space-6: 24px;
+  --lp-space-8: 32px;
+  --lp-space-10: 40px;
+
+  /* Typography */
+  --lp-font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --lp-font-size-xs: 0.75rem;
+  --lp-font-size-sm: 0.875rem;
+  --lp-font-size-md: 1rem;
+  --lp-font-size-lg: 1.125rem;
+  --lp-font-size-xl: 1.375rem;
+  --lp-font-size-2xl: 1.75rem;
+  --lp-font-weight-regular: 400;
+  --lp-font-weight-medium: 500;
+  --lp-font-weight-semibold: 600;
+  --lp-font-weight-bold: 700;
+
+  /* Shadow */
+  --lp-shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --lp-shadow-md: 0 4px 12px rgba(16, 24, 40, 0.08);
+  --lp-shadow-lg: 0 8px 24px rgba(16, 24, 40, 0.1);
+
+  /* Focus */
+  --lp-focus-ring: 0 0 0 3px rgba(11, 87, 208, 0.3);
+
+  /* Layout */
+  --lp-max-width: 560px;
+  --lp-breakpoint-sm: 40rem;
+  --lp-breakpoint-md: 48rem;
+  --lp-breakpoint-lg: 64rem;
+  --lp-safe-top: env(safe-area-inset-top, 0px);
+  --lp-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --lp-safe-left: env(safe-area-inset-left, 0px);
+  --lp-safe-right: env(safe-area-inset-right, 0px);
+
+  /* Motion */
+  --lp-motion-fast: 120ms;
+  --lp-motion-base: 200ms;
+  --lp-ease-out: cubic-bezier(0.2, 0, 0, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --lp-motion-fast: 0ms;
+    --lp-motion-base: 0ms;
+  }
+}
