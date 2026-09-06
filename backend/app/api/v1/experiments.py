@@ -1,0 +1,132 @@
+"""Development-only VLM experiment endpoints (M4 §9-12, §15, §128).
+
+- Bounded multipart upload of already-selected frames (never browser Base64 JSON).
+- Refuses to operate unless VLM_EXPERIMENT_ENABLED=true AND the environment is not
+  uat/production (M4 §11).
+- No bank production APIs; no persistence of capture bytes.
+"""
+
+from __future__ import annotations
+
+import io
+from typing import Any, cast
+
+from fastapi import APIRouter, File, Form, Request, UploadFile
+
+from app.core.config import Settings
+from app.experiments.vlm import ExperimentEvaluateRequest, VlmEvaluationService
+from app.experiments.vlm.frame_selection import FRAME_STRATEGIES, is_supported_strategy
+from app.providers.vision import (
+    VlmError,
+    VlmErrorCode,
+    available_providers,
+)
+from app.providers.vision.models import ImageInput
+
+router = APIRouter(prefix="/experiments/vlm", tags=["experiments"])
+
+JPEG_SIGNATURE = b"\xff\xd8\xff"
+MAX_IMAGE_DIMENSION = 4096
+
+
+def _settings(request: Request) -> Settings:
+    return cast(Settings, request.app.state.settings)
+
+
+def _guard(request: Request) -> None:
+    settings = _settings(request)
+    if not settings.vlm_experiment_available:
+        raise VlmError(VlmErrorCode.VLM_DISABLED, "VLM experiment is not enabled")
+
+
+def _validate_image(data: bytes, declared_mime: str) -> str:
+    allowed = ("image/jpeg",)
+    if declared_mime not in allowed:
+        raise VlmError(VlmErrorCode.UNSUPPORTED_MEDIA_TYPE, "unsupported media type")
+    if not data.startswith(JPEG_SIGNATURE):
+        raise VlmError(VlmErrorCode.UNSUPPORTED_MEDIA_TYPE, "not a valid JPEG")
+    if len(data) == 0:
+        raise VlmError(VlmErrorCode.PROVIDER_BAD_REQUEST, "empty image")
+    _verify_decodeable(data)
+    return declared_mime
+
+
+def _verify_decodeable(data: bytes) -> None:
+    from PIL import Image, UnidentifiedImageError
+
+    Image.MAX_IMAGE_PIXELS = 40_000_000
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            if image.width > MAX_IMAGE_DIMENSION or image.height > MAX_IMAGE_DIMENSION:
+                raise VlmError(VlmErrorCode.REQUEST_TOO_LARGE, "image dimensions exceed limit")
+            image.verify()
+    except VlmError:
+        raise
+    except Image.DecompressionBombError as exc:
+        raise VlmError(
+            VlmErrorCode.REQUEST_TOO_LARGE, "image exceeds decompression limits"
+        ) from exc
+    except (UnidentifiedImageError, OSError, ValueError) as exc:
+        raise VlmError(VlmErrorCode.UNSUPPORTED_MEDIA_TYPE, "image could not be decoded") from exc
+
+
+async def _read_bounded(upload: UploadFile, limit: int) -> bytes:
+    data = await upload.read(limit + 1)
+    if len(data) > limit:
+        raise VlmError(VlmErrorCode.REQUEST_TOO_LARGE, "image exceeds the size limit")
+    return data
+
+
+@router.get("/providers")
+def list_providers(request: Request) -> dict[str, list[str]]:
+    _guard(request)
+    return {"providers": available_providers(_settings(request))}
+
+
+@router.post("/evaluate")
+async def evaluate_vlm(
+    request: Request,
+    strategy: str = Form(...),
+    provider: str = Form(...),
+    capture_config_version: str = Form(""),
+    quality_config_version: str = Form(""),
+    frame_selection_version: str = Form(""),
+    mock_behavior: str = Form(""),
+    frames: list[UploadFile] = File(...),  # noqa: B008
+) -> Any:
+    _guard(request)
+    settings = _settings(request)
+
+    if not is_supported_strategy(strategy):
+        raise VlmError(VlmErrorCode.PROVIDER_BAD_REQUEST, f"unsupported strategy '{strategy}'")
+    expected_count = FRAME_STRATEGIES[strategy]
+    if len(frames) != expected_count:
+        raise VlmError(
+            VlmErrorCode.PROVIDER_BAD_REQUEST,
+            f"strategy '{strategy}' requires {expected_count} frame(s), got {len(frames)}",
+        )
+    if len(frames) > settings.vlm_max_frames:
+        raise VlmError(VlmErrorCode.TOO_MANY_IMAGES, "too many images")
+
+    image_inputs: list[ImageInput] = []
+    total_bytes = 0
+    for index, upload in enumerate(frames):
+        data = await _read_bounded(upload, settings.vlm_max_single_image_bytes)
+        total_bytes += len(data)
+        if total_bytes > settings.vlm_max_total_image_bytes:
+            raise VlmError(VlmErrorCode.REQUEST_TOO_LARGE, "total image bytes exceed the limit")
+        mime = _validate_image(data, upload.content_type or "image/jpeg")
+        image_inputs.append(ImageInput(bytes=data, mime_type=mime, sequence=index))
+
+    experiment_request = ExperimentEvaluateRequest(
+        strategy=strategy,
+        capture_config_version=capture_config_version,
+        quality_config_version=quality_config_version,
+        frame_selection_version=frame_selection_version,
+        provider=provider,
+        mock_behavior=mock_behavior,
+        frames=image_inputs,
+    )
+
+    service = VlmEvaluationService(settings)
+    return await service.evaluate(experiment_request)

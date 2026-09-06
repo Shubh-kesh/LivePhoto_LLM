@@ -33,6 +33,39 @@ http_request_duration_seconds = Histogram(
     buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
 )
 
+# VLM experiment metrics (M4 §125-126). Low cardinality only: provider, coarse result/error —
+# never transaction/capture/sample IDs or model-generated text.
+vlm_requests_total = Counter(
+    "livephoto_vlm_requests_total",
+    "Total VLM evaluation requests",
+    labelnames=("provider", "result"),
+)
+
+vlm_request_duration_seconds = Histogram(
+    "livephoto_vlm_request_duration_seconds",
+    "VLM evaluation duration in seconds",
+    labelnames=("provider",),
+    buckets=(0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0),
+)
+
+vlm_provider_errors_total = Counter(
+    "livephoto_vlm_provider_errors_total",
+    "VLM provider errors",
+    labelnames=("provider", "error_type"),
+)
+
+
+def record_vlm_evaluation(
+    provider: str,
+    result: str,
+    duration_seconds: float,
+    error_type: str | None = None,
+) -> None:
+    vlm_requests_total.labels(provider, result).inc()
+    vlm_request_duration_seconds.labels(provider).observe(duration_seconds)
+    if error_type is not None:
+        vlm_provider_errors_total.labels(provider, error_type).inc()
+
 
 def record_http_request(
     method: str, route_path: str | None, status: int, duration_seconds: float

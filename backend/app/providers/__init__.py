@@ -1,5 +1,5 @@
-"""Vision provider package (M0 ADR-005)."""
+"""Vision provider package (M0 ADR-005, M4)."""
 
-from app.providers.vision import VisionPrompt, VisionProvider, VisionProviderResult
+from app.providers.vision import VisionProvider, VisionProviderInfo
 
-__all__ = ["VisionPrompt", "VisionProvider", "VisionProviderResult"]
+__all__ = ["VisionProvider", "VisionProviderInfo"]

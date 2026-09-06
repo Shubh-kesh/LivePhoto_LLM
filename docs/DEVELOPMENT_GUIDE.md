@@ -154,7 +154,20 @@ docs/             M0 architecture baseline + this guide
 - The stub face detector is selected only when the build sets `VITE_FACE_PROVIDER=stub` (test/E2E);
   no production path can force QUALITY_READY.
 
-## 15. Session-state contract (M1)
+## 15. VLM experiment conventions (M4)
+
+- The browser never talks to external providers and never holds provider keys; all VLM traffic goes
+  through the backend experiment endpoint (multipart, bounded, no JSON Base64).
+- Providers implement `VisionProvider` (info/capabilities/evaluate/health); business code depends
+  only on the interface. Real providers require a configured key + model; `mock` is for tests/E2E.
+- Prompt (`vlm-passive-v1`) and schema (`vlm-result-v1`) are immutable per version.
+- The experiment endpoint is disabled by default and refused in uat/production
+  (`VLM_EXPERIMENT_ENABLED` + `vlm_experiment_available`).
+- Provider failures are fail-closed (never LIVE); `self_reported_confidence` is not calibrated.
+- Never log image bytes, Base64 transport, or raw provider outputs; keys are redacted.
+- Dataset manifests/results live in git-ignored `local-data/` and `artifacts/`.
+
+## 16. Session-state contract (M1)
 
 `backend/app/domain/session.py` defines `SessionState` (lifecycle) separate from
 `DecisionOutcome` (liveness decision). Conceptual transitions (implemented in a later milestone):

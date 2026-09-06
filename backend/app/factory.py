@@ -14,6 +14,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import v1_router
+from app.api.experiments_router import experiments_router
 from app.api.health import router as health_router
 from app.core.config import Settings, get_settings
 from app.core.errors import register_exception_handlers
@@ -82,6 +83,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(health_router)
     app.include_router(v1_router, prefix=settings.api_v1_prefix)
+    app.include_router(experiments_router, prefix=settings.api_v1_prefix)
 
     if settings.prometheus_enabled:
         app.add_route(

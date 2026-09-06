@@ -17,7 +17,25 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.providers.vision.errors import VlmError, VlmErrorCode
+
 logger = logging.getLogger("livephoto.errors")
+
+VLM_ERROR_STATUS: dict[VlmErrorCode, int] = {
+    VlmErrorCode.VLM_DISABLED: 403,
+    VlmErrorCode.PROVIDER_NOT_CONFIGURED: 503,
+    VlmErrorCode.PROVIDER_AUTH_ERROR: 502,
+    VlmErrorCode.PROVIDER_TIMEOUT: 503,
+    VlmErrorCode.PROVIDER_RATE_LIMITED: 503,
+    VlmErrorCode.PROVIDER_UNAVAILABLE: 503,
+    VlmErrorCode.PROVIDER_BAD_REQUEST: 400,
+    VlmErrorCode.REQUEST_TOO_LARGE: 413,
+    VlmErrorCode.TOO_MANY_IMAGES: 400,
+    VlmErrorCode.UNSUPPORTED_MEDIA_TYPE: 415,
+    VlmErrorCode.SCHEMA_VALIDATION_ERROR: 502,
+    VlmErrorCode.PROVIDER_RESPONSE_ERROR: 502,
+    VlmErrorCode.UNKNOWN_PROVIDER_ERROR: 502,
+}
 
 
 class ErrorDetail(BaseModel):
@@ -76,6 +94,16 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=exc.status_code,
             content=_envelope(request, exc.code, exc.message, exc.status_code),
+        )
+
+    @app.exception_handler(VlmError)
+    async def _handle_vlm_error(request: Request, exc: VlmError) -> Any:
+        from fastapi.responses import JSONResponse
+
+        status = VLM_ERROR_STATUS.get(exc.code, 502)
+        return JSONResponse(
+            status_code=status,
+            content=_envelope(request, exc.code.value, exc.message, status),
         )
 
     @app.exception_handler(StarletteHTTPException)

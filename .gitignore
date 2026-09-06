@@ -62,6 +62,11 @@ models/
 frontend/model-assets/face_detector.task
 frontend/public/mediapipe-wasm/
 
+# ---- M4 evaluation data / artifacts (never commit datasets or dumps) --------
+local-data/
+artifacts/
+provider-response-dumps/
+
 # ---- Biometric captures / local object storage --------------------------------
 captures/
 raw-captures/

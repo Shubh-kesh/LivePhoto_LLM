@@ -14,6 +14,7 @@ import { CapturePreview } from './components/CapturePreview'
 import { QualityChecking } from './components/QualityChecking'
 import { QualityRetryScreen } from './components/QualityRetryScreen'
 import { useCaptureFlow, type UseCaptureFlowResult } from './hooks/useCaptureFlow'
+import { VlmExperimentPanel } from '../experiment/VlmExperimentPanel'
 import type { CaptureBundle } from './types/capture'
 import type { FaceDetectorProvider } from './quality/face/FaceDetectorProvider'
 import type { BundleQualityAssessment } from './quality/types/quality'
@@ -86,11 +87,16 @@ export function CapturePage({
       )}
 
       {flow.state === 'preview' && flow.previewUrl && (
-        <CapturePreview
-          previewUrl={flow.previewUrl}
-          onRetake={() => void flow.retake()}
-          onConfirm={flow.confirm}
-        />
+        <>
+          <CapturePreview
+            previewUrl={flow.previewUrl}
+            onRetake={() => void flow.retake()}
+            onConfirm={flow.confirm}
+          />
+          {import.meta.env.DEV && flow.bundle && (
+            <VlmExperimentPanel bundle={flow.bundle} quality={flow.qualityAssessment} />
+          )}
+        </>
       )}
 
       {flow.state === 'confirmed' && (

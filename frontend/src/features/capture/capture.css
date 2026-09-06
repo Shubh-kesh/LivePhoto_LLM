@@ -115,6 +115,60 @@
   flex-wrap: wrap;
 }
 
+/* VLM experiment panel (M4 §64-69, development builds only). */
+.vlm-experiment {
+  border-top: 1px solid #ddd;
+  padding-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.vlm-experiment__label {
+  font-weight: 600;
+  margin: 0;
+}
+
+.vlm-experiment__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.vlm-experiment__controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+}
+
+.vlm-experiment__controls select {
+  min-height: 40px;
+  padding: 0.4rem 0.5rem;
+  border-radius: 0.5rem;
+  border: 1px solid #aaa;
+}
+
+.vlm-experiment__error {
+  color: #b3261e;
+  margin: 0;
+}
+
+.vlm-experiment__result {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.25rem 1rem;
+  margin: 0;
+}
+
+.vlm-experiment__result dt {
+  font-weight: 600;
+}
+
+.vlm-experiment__result dd {
+  margin: 0;
+}
+
 .capture-progress {
   position: absolute;
   inset: auto 0 0 0;

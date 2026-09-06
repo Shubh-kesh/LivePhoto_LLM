@@ -28,6 +28,33 @@ const DEFAULT_TIMEOUT_MS = 10_000
  * timeouts. Foundation calls only (M1 §40).
  */
 export async function apiRequest<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
+  const response = await request(path, {
+    method: 'GET',
+    headers: options.headers,
+    timeoutMs: options.timeoutMs,
+  })
+  return (await response.json()) as T
+}
+
+/** Multipart POST (M4 §12): image bytes are sent as form data, never JSON Base64. */
+export async function apiPostMultipart(
+  path: string,
+  body: FormData,
+  timeoutMs = 15_000,
+): Promise<unknown> {
+  const response = await request(path, { method: 'POST', body, timeoutMs })
+  return (await response.json()) as unknown
+}
+
+async function request(
+  path: string,
+  options: {
+    method: string
+    headers?: Record<string, string>
+    body?: BodyInit
+    timeoutMs?: number
+  },
+): Promise<Response> {
   const controller = new AbortController()
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const timer = setTimeout(() => controller.abort(), timeoutMs)
@@ -35,8 +62,9 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
   let response: Response
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
-      method: 'GET',
-      headers: { Accept: 'application/json', ...options.headers },
+      method: options.method,
+      headers: { Accept: 'application/json', ...(options.headers ?? {}) },
+      body: options.body,
       signal: controller.signal,
     })
   } catch {
@@ -49,9 +77,7 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
   if (!response.ok) {
     throw await parseErrorResponse(response, requestId)
   }
-
-  const data: unknown = await response.json()
-  return data as T
+  return response
 }
 
 async function parseErrorResponse(

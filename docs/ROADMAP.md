@@ -1,8 +1,8 @@
 # LivePhoto — Roadmap (M0 Baseline, updated for M1)
 
-Status: **M0 COMPLETE, M1 COMPLETE, M2 COMPLETE, M3 COMPLETE.** M4+ are planned and are **not
-implemented** in M3. Each milestone: goal / scope / non-scope / dependencies / deliverables /
-acceptance criteria / major risks.
+Status: **M0 COMPLETE, M1 COMPLETE, M2 COMPLETE, M3 COMPLETE, M4 COMPLETE (engineering).** M5+ are
+planned and are **not implemented** in M4. Each milestone: goal / scope / non-scope / dependencies /
+deliverables / acceptance criteria / major risks.
 
 Dependencies and acceptance criteria reference the design docs in this repository. Milestones may
 be re-sequenced as evaluation results (M4–M9) dictate.
@@ -73,14 +73,24 @@ be re-sequenced as evaluation results (M4–M9) dictate.
   gate required before meaningful M4 accuracy).
 
 ## M4 — VLM-Only Baseline (Experiment A)
+- **Status: COMPLETE (engineering).** Accuracy conclusions pending the real-device gate + a
+  meaningful genuine/spoof dataset.
 - **Goal:** Stand up VLM-only pipeline on external POC providers.
-- **Scope:** `VisionProvider` abstraction (Gemini/Groq/OpenRouter/Mock); versioned prompt;
-  VLM validator; POC data only; outputs LIVE/SPOOF/QUALITY_FAILURE/UNCERTAIN.
-- **Non-scope:** Production VLM dependency; bank data; fusion.
-- **Dependencies:** M3 (frames available).
-- **Deliverables:** Experiment A harness run on POC/demo data.
-- **Acceptance criteria:** VLM-only metrics reported per class; prompt versioning working.
-- **Major risks:** VLM latency/cost; calibration absent; hallucinated confidence.
+- **Scope:** `VisionProvider` contract (info/capabilities/evaluate/health); Gemini/OpenRouter/Groq/
+  Mock providers; `vlm-passive-v1` prompt + `vlm-result-v1` schema; development-only bounded
+  multipart experiment endpoint (disabled by default, refused in uat/production); frame strategies
+  `single-quality-v1` and `temporal-triad-v1`; dataset manifest/harness + CLI runner with resume,
+  metrics, false-accept/false-reject/disagreement reports; dev experiment UI; E2E with mock
+  backend/provider; external-provider policy docs.
+- **Non-scope:** Production VLM dependency; bank data; fusion; ensemble decisions; CV spoof layers;
+  active liveness.
+- **Dependencies:** M3 (including pinned face-model hash + real-model smoke).
+- **Deliverables:** Provider package, experiment service/endpoint, harness, docs
+  (`VLM_EXTERNAL_PROVIDER_POLICY.md`, `VLM_PROVIDER_ARCHITECTURE.md`, `VLM_PROMPT_DESIGN.md`,
+  `VLM_BASELINE_EVALUATION.md`), E2E.
+- **Acceptance criteria:** M4 §171 engineering list; all checks green with no provider keys in CI;
+  E2E mock flow passes.
+- **Major risks:** No live providers exercised; no real-device accuracy; dataset not yet collected.
 
 ## M5 — Baseline Evaluation
 - **Goal:** First benchmark of whatever pipeline exists (A and/or B) with attack-specific

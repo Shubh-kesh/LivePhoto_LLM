@@ -26,6 +26,7 @@ _SENSITIVE_HEADERS = frozenset(
         "cookie",
         "set-cookie",
         "proxy-authorization",
+        "x-goog-api-key",
     }
 )
 

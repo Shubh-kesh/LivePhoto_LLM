@@ -9,6 +9,10 @@ from app.observability.metrics import (
     http_requests_total,
     metrics_response,
     record_http_request,
+    record_vlm_evaluation,
+    vlm_provider_errors_total,
+    vlm_request_duration_seconds,
+    vlm_requests_total,
 )
 from app.observability.otel import init_otel
 
@@ -18,4 +22,8 @@ __all__ = [
     "init_otel",
     "metrics_response",
     "record_http_request",
+    "record_vlm_evaluation",
+    "vlm_provider_errors_total",
+    "vlm_request_duration_seconds",
+    "vlm_requests_total",
 ]

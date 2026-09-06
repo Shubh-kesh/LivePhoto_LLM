@@ -10,7 +10,7 @@ import json
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import field_validator, model_validator
+from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 AppEnvironment = Literal["local", "test", "development", "uat", "production"]
@@ -54,6 +54,28 @@ class Settings(BaseSettings):
     metrics_path: str = "/metrics"
 
     hsts_enabled: bool = False
+
+    # ---- VLM experiment (M4) — development-only, disabled by default. ----
+    vlm_experiment_enabled: bool = False
+    vlm_provider: str = ""
+    vlm_timeout_seconds: float = 60.0
+    vlm_max_retries: int = 1
+    vlm_max_frames: int = 3
+    vlm_max_single_image_bytes: int = 5 * 1024 * 1024
+    vlm_max_total_image_bytes: int = 15 * 1024 * 1024
+    vlm_allowed_mime_types: tuple[str, ...] = ("image/jpeg",)
+
+    gemini_api_key: SecretStr = SecretStr("")
+    gemini_model: str = ""
+    groq_api_key: SecretStr = SecretStr("")
+    groq_model: str = ""
+    openrouter_api_key: SecretStr = SecretStr("")
+    openrouter_model: str = ""
+
+    @property
+    def vlm_experiment_available(self) -> bool:
+        """Experiment endpoint usable only when enabled AND never in uat/production (M4 §10-11)."""
+        return self.vlm_experiment_enabled and self.app_env not in ("uat", "production")
 
     @field_validator("cors_origins", mode="before")
     @classmethod

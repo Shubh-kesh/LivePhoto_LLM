@@ -16,6 +16,9 @@ dependencies = [
     "prometheus-client>=0.21,<1",
     "opentelemetry-api>=1.28,<2",
     "opentelemetry-sdk>=1.28,<2",
+    "google-genai>=1.10,<2",
+    "Pillow>=11,<13",
+    "python-multipart>=0.0.12,<1",
 ]
 
 [dependency-groups]
@@ -68,6 +71,9 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 asyncio_mode = "auto"
+markers = [
+    "live_vlm: optional live external-VLM tests (require VLM_LIVE_TESTS_ENABLED=true + credentials)",
+]
 
 [tool.coverage.run]
 source = ["app"]

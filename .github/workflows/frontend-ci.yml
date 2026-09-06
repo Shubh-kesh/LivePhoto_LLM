@@ -50,5 +50,14 @@ jobs:
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: Capture E2E (fake camera)
+      - name: Set up uv for the mock backend
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: uv python install 3.13 && uv sync --no-dev
+
+      - name: Capture E2E (fake camera + mock VLM backend)
         run: npm run test:e2e
