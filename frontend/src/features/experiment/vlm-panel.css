@@ -1,0 +1,91 @@
+/* VLM experiment panel (M4, M5.6) — collapsed by default, UAT-only diagnostic. */
+
+.vlm-experiment {
+  margin-top: var(--lp-space-6);
+  border-top: 1px solid var(--lp-color-border);
+  padding-top: var(--lp-space-3);
+}
+
+.vlm-experiment__summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--lp-space-2);
+  cursor: pointer;
+  font-weight: var(--lp-font-weight-semibold);
+  font-size: var(--lp-font-size-md);
+  padding: var(--lp-space-2) 0;
+  list-style: none;
+}
+.vlm-experiment__summary::-webkit-details-marker {
+  display: none;
+}
+.vlm-experiment__summary::after {
+  content: '▾';
+  color: var(--lp-color-text-secondary);
+}
+
+.vlm-experiment__uat-note {
+  color: var(--lp-color-text-secondary);
+  font-size: var(--lp-font-size-sm);
+  font-weight: var(--lp-font-weight-regular);
+}
+
+.vlm-experiment__label {
+  font-weight: var(--lp-font-weight-semibold);
+  margin: var(--lp-space-2) 0;
+}
+
+.vlm-experiment__controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lp-space-3);
+}
+
+.vlm-experiment__controls label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lp-space-1);
+  font-size: var(--lp-font-size-sm);
+  font-weight: var(--lp-font-weight-medium);
+}
+
+.vlm-experiment__controls select {
+  min-height: 44px;
+  padding: var(--lp-space-2) var(--lp-space-3);
+  border-radius: var(--lp-radius-md);
+  border: 1px solid var(--lp-color-border);
+  background: var(--lp-color-surface);
+  font: inherit;
+}
+
+.vlm-experiment__model {
+  color: var(--lp-color-text-secondary);
+  font-size: var(--lp-font-size-md);
+  font-weight: var(--lp-font-weight-regular);
+  word-break: break-word;
+}
+
+.vlm-experiment__error {
+  color: var(--lp-color-danger);
+  margin: var(--lp-space-3) 0 0;
+}
+
+.vlm-experiment__run {
+  margin-top: var(--lp-space-3);
+}
+
+.vlm-experiment__result {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--lp-space-1) var(--lp-space-4);
+  margin: var(--lp-space-4) 0 0;
+}
+
+.vlm-experiment__result dt {
+  font-weight: var(--lp-font-weight-semibold);
+}
+
+.vlm-experiment__result dd {
+  margin: 0;
+}

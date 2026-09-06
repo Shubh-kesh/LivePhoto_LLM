@@ -56,6 +56,8 @@ export default defineConfig({
       timeout: 60_000,
       env: {
         VITE_FACE_PROVIDER: 'stub',
+        // E2E always talks to the locally-provisioned backend (overrides any local frontend/.env).
+        VITE_API_BASE_URL: 'http://localhost:8000',
       },
     },
   ],

@@ -10,13 +10,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { ApiClientError } from '../../api/client'
+import { Button } from '../../design-system'
 import { captureConfig } from '../capture/config/captureConfig'
 import { qualityConfig } from '../capture/quality/config/qualityConfig'
 import type { CaptureBundle } from '../capture/types/capture'
 import type { BundleQualityAssessment } from '../capture/quality/types/quality'
 import { evaluateVlmExperiment, getVlmProviders } from './api'
 import { selectFramesForStrategy, type ExperimentFrameStrategy } from './frameSelection'
-import type { VlmExperimentResult } from './schemas'
+import type { VlmExperimentResult, VlmProviderDescriptor } from './schemas'
+import './vlm-panel.css'
 
 interface VlmExperimentPanelProps {
   bundle: CaptureBundle
@@ -37,7 +39,7 @@ const MOCK_BEHAVIORS = [
 ]
 
 export function VlmExperimentPanel({ bundle, quality }: VlmExperimentPanelProps) {
-  const [providers, setProviders] = useState<string[]>([])
+  const [providers, setProviders] = useState<VlmProviderDescriptor[]>([])
   const [unavailable, setUnavailable] = useState(false)
   const [provider, setProvider] = useState('')
   const [strategy, setStrategy] = useState<ExperimentFrameStrategy>('single-quality-v1')
@@ -49,10 +51,10 @@ export function VlmExperimentPanel({ bundle, quality }: VlmExperimentPanelProps)
   useEffect(() => {
     let cancelled = false
     getVlmProviders()
-      .then((list) => {
+      .then(({ providers: list, defaultProvider }) => {
         if (cancelled) return
         setProviders(list)
-        if (list.length > 0) setProvider(list[0])
+        if (list.length > 0) setProvider(defaultProvider ?? list[0].name)
       })
       .catch(() => {
         if (!cancelled) setUnavailable(true)
@@ -61,6 +63,8 @@ export function VlmExperimentPanel({ bundle, quality }: VlmExperimentPanelProps)
       cancelled = true
     }
   }, [])
+
+  const selectedProvider = providers.find((descriptor) => descriptor.name === provider) ?? null
 
   const selectedFrames = useMemo(
     () => selectFramesForStrategy(bundle, quality, strategy),
@@ -108,8 +112,12 @@ export function VlmExperimentPanel({ bundle, quality }: VlmExperimentPanelProps)
   const hasFrames = selectedFrames.length > 0
 
   return (
-    <section className="vlm-experiment" aria-labelledby="vlm-experiment-heading">
-      <h2 id="vlm-experiment-heading">VLM experiment</h2>
+    <details className="vlm-experiment" data-testid="vlm-experiment" aria-label="VLM test">
+      <summary className="vlm-experiment__summary">
+        <span>VLM test</span>
+        <span className="vlm-experiment__uat-note">Experimental — UAT only</span>
+      </summary>
+
       <p className="vlm-experiment__label">Experimental result — not a banking decision.</p>
 
       <div className="vlm-experiment__controls">
@@ -117,12 +125,17 @@ export function VlmExperimentPanel({ bundle, quality }: VlmExperimentPanelProps)
           Provider
           <select value={provider} onChange={(event) => setProvider(event.target.value)}>
             {providers.length === 0 && <option value="">No providers configured</option>}
-            {providers.map((name) => (
-              <option key={name} value={name}>
-                {name}
+            {providers.map((descriptor) => (
+              <option key={descriptor.name} value={descriptor.name}>
+                {descriptor.name}
               </option>
             ))}
           </select>
+        </label>
+
+        <label>
+          Model
+          <span className="vlm-experiment__model">{selectedProvider?.model ?? '—'}</span>
         </label>
 
         <label>
@@ -157,14 +170,14 @@ export function VlmExperimentPanel({ bundle, quality }: VlmExperimentPanelProps)
         </p>
       )}
 
-      <button
+      <Button
         type="button"
-        className="camera-control"
+        className="vlm-experiment__run"
         onClick={() => void run()}
         disabled={running || !provider || !hasFrames}
       >
-        {running ? 'Running experiment…' : 'Run VLM experiment'}
-      </button>
+        {running ? 'Running experiment…' : 'Run VLM test'}
+      </Button>
 
       {errorMessage && (
         <p className="vlm-experiment__error" role="alert">
@@ -212,8 +225,12 @@ export function VlmExperimentPanel({ bundle, quality }: VlmExperimentPanelProps)
             <dt>Latency</dt>
             <dd>{result.latency_ms ?? 'n/a'} ms</dd>
           </div>
+          <div>
+            <dt>Request ID</dt>
+            <dd>{result.experiment_id ?? 'n/a'}</dd>
+          </div>
         </dl>
       )}
-    </section>
+    </details>
   )
 }

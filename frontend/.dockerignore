@@ -1,0 +1,23 @@
+# Frontend Docker build context excludes (M5.6 §81).
+# Secrets, test fixtures and build caches must never enter an image.
+
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+node_modules
+dist
+coverage
+test-results
+playwright-report
+e2e/.fixtures
+local-data
+artifacts
+*.log
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.mp4
+*.mov

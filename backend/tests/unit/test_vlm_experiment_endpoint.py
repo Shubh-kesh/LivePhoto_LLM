@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 
 from fastapi.testclient import TestClient
 from PIL import Image
@@ -77,7 +78,60 @@ def test_providers_list_endpoint() -> None:
     with TestClient(app) as client:
         response = client.get("/api/v1/experiments/vlm/providers")
     assert response.status_code == 200
-    assert "mock" in response.json()["providers"]
+    body = response.json()
+    assert body["experiment_enabled"] is True
+    names = [provider["name"] for provider in body["providers"]]
+    assert "mock" in names
+    mock = next(p for p in body["providers"] if p["name"] == "mock")
+    assert mock["model"] == "mock-vision-v1"
+    assert "api_key" not in json.dumps(body).lower()
+
+
+def test_providers_list_blocked_when_experiment_disabled() -> None:
+    app = create_app(_settings(vlm_experiment_enabled=False))
+    with TestClient(app) as client:
+        response = client.get("/api/v1/experiments/vlm/providers")
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "VLM_DISABLED"
+
+
+def test_uat_experiment_requires_uat_local_flag() -> None:
+    app = create_app(_settings(app_env="uat", vlm_experiment_enabled=True))
+    with TestClient(app) as client:
+        assert client.get("/api/v1/experiments/vlm/providers").status_code == 403
+        assert _post(client, _files(1)).json()["error"]["code"] == "VLM_DISABLED"
+
+    app_enabled = create_app(
+        _settings(
+            app_env="uat",
+            vlm_experiment_enabled=True,
+            vlm_uat_local_experiment_enabled=True,
+            local_vlm_base_url="http://gemma:8000/v1",
+            local_vlm_model="google/gemma-3-12b-it",
+        )
+    )
+    with TestClient(app_enabled) as client:
+        body = client.get("/api/v1/experiments/vlm/providers").json()
+        names = [provider["name"] for provider in body["providers"]]
+        assert names == ["local"]
+        assert "gemini" not in names
+        assert "mock" not in names
+
+
+def test_production_experiment_hard_blocked() -> None:
+    app = create_app(
+        _settings(
+            app_env="production",
+            vlm_experiment_enabled=True,
+            vlm_uat_local_experiment_enabled=True,
+            local_vlm_base_url="http://gemma:8000/v1",
+            local_vlm_model="google/gemma-3-12b-it",
+        )
+    )
+    with TestClient(app) as client:
+        response = client.get("/api/v1/experiments/vlm/providers")
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "VLM_DISABLED"
 
 
 def test_strategy_frame_count_enforced() -> None:

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -29,6 +30,26 @@ _SENSITIVE_HEADERS = frozenset(
         "x-goog-api-key",
     }
 )
+
+#: Maximum length for optional raw local-model response logging (M5.6 §34).
+RAW_MODEL_TEXT_MAX_CHARS = 8192
+
+#: Content-level secret patterns masked inside raw model text before logging (M5.6 §34).
+_RAW_SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"(?i)(api[_-]?key\s*[:=]\s*)\S+"),
+    re.compile(r"(?i)(bearer\s+)\S+"),
+    re.compile(r"(?i)\b(sk-[A-Za-z0-9_-]{8,})\b"),
+)
+
+
+def redact_raw_text(text: str) -> str:
+    """Mask common secret patterns inside optional raw model text and bound its length."""
+    masked = text
+    for pattern in _RAW_SECRET_PATTERNS:
+        masked = pattern.sub(
+            lambda m: m.group(1) + "[REDACTED]" if m.lastindex else "[REDACTED]", masked
+        )
+    return masked[:RAW_MODEL_TEXT_MAX_CHARS]
 
 
 def _is_sensitive_key(key: str) -> bool:

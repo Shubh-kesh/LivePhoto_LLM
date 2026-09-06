@@ -20,6 +20,7 @@ from app.providers.vision import (
     VlmError,
     VlmErrorCode,
     available_providers,
+    get_vision_provider,
 )
 from app.providers.vision.models import ImageInput
 
@@ -78,9 +79,31 @@ async def _read_bounded(upload: UploadFile, limit: int) -> bytes:
 
 
 @router.get("/providers")
-def list_providers(request: Request) -> dict[str, list[str]]:
+def list_providers(request: Request) -> dict[str, object]:
+    """Environment-permitted providers with non-sensitive descriptor info (M5.6 §26).
+
+    Never returns API keys or internal service URLs.
+    """
     _guard(request)
-    return {"providers": available_providers(_settings(request))}
+    settings = _settings(request)
+    names = available_providers(settings)
+    providers = [
+        {
+            "name": provider.info.provider_name,
+            "model": provider.info.model_id,
+            "provider_adapter_version": provider.info.provider_adapter_version,
+            "max_images": provider.capabilities.max_images_per_request,
+            "supports_structured_output": provider.capabilities.supports_structured_output,
+            "supports_inline_images": provider.capabilities.supports_inline_images,
+        }
+        for provider in (get_vision_provider(settings, name) for name in names)
+    ]
+    return {
+        "experiment_enabled": True,
+        "environment": settings.app_env,
+        "providers": providers,
+        "default_provider": providers[0]["name"] if providers else None,
+    }
 
 
 @router.post("/evaluate")

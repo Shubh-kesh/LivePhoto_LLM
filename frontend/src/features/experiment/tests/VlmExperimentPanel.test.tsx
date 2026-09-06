@@ -1,5 +1,5 @@
 /**
- * VLM experiment panel tests (M4 §147).
+ * VLM experiment panel tests (M4 §147, M5.6 §84).
  */
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
@@ -58,14 +58,33 @@ function quality(): BundleQualityAssessment {
   }
 }
 
+function openPanel(): void {
+  fireEvent.click(screen.getByText('VLM test'))
+}
+
 describe('VlmExperimentPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockedProviders.mockResolvedValue(['mock'])
+    mockedProviders.mockResolvedValue({
+      experimentEnabled: true,
+      defaultProvider: 'mock',
+      providers: [{ name: 'mock', model: 'mock-vision-v1' }],
+    })
+  })
+
+  it('is collapsed by default and shows the UAT-only note', async () => {
+    const { container } = render(<VlmExperimentPanel bundle={bundle()} quality={quality()} />)
+    expect(screen.getByText('VLM test')).toBeInTheDocument()
+    expect(screen.getByText('Experimental — UAT only')).toBeInTheDocument()
+    // Collapsed by default: the panel details are closed until the tester expands them.
+    expect((container.querySelector('.vlm-experiment') as HTMLDetailsElement | null)?.open).toBe(
+      false,
+    )
   })
 
   it('shows the experimental label and never "verified" wording', async () => {
     render(<VlmExperimentPanel bundle={bundle()} quality={quality()} />)
+    openPanel()
     expect(
       await screen.findByText('Experimental result — not a banking decision.'),
     ).toBeInTheDocument()
@@ -77,6 +96,7 @@ describe('VlmExperimentPanel', () => {
   it('shows a safe unavailable message when providers are not configured', async () => {
     mockedProviders.mockRejectedValue(new Error('disabled'))
     render(<VlmExperimentPanel bundle={bundle()} quality={quality()} />)
+    openPanel()
     expect(
       await screen.findByText('VLM experiment is unavailable in this environment.'),
     ).toBeInTheDocument()
@@ -98,12 +118,13 @@ describe('VlmExperimentPanel', () => {
       latency_ms: 120,
     })
     render(<VlmExperimentPanel bundle={bundle()} quality={quality()} />)
+    openPanel()
     await screen.findByText('Experimental result — not a banking decision.')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Run VLM experiment' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Run VLM test' }))
     await waitFor(() => expect(mockedEvaluate).toHaveBeenCalledTimes(1))
     expect(await screen.findByText('SCREEN_REPLAY')).toBeInTheDocument()
-    expect(screen.getByText('mock-vision-v1')).toBeInTheDocument()
+    expect(screen.getAllByText('mock-vision-v1').length).toBeGreaterThan(0)
     expect(screen.getByText('DEVICE_BORDER_VISIBLE')).toBeInTheDocument()
   })
 
@@ -113,19 +134,21 @@ describe('VlmExperimentPanel', () => {
       new ApiClientError('PROVIDER_TIMEOUT', 'provider request timed out', 503, null),
     )
     render(<VlmExperimentPanel bundle={bundle()} quality={quality()} />)
+    openPanel()
     await screen.findByText('Experimental result — not a banking decision.')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Run VLM experiment' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Run VLM test' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('PROVIDER_TIMEOUT')
   })
 
   it('allows choosing the triad strategy', async () => {
     render(<VlmExperimentPanel bundle={bundle()} quality={quality()} />)
+    openPanel()
     await screen.findByText('Experimental result — not a banking decision.')
     fireEvent.change(screen.getByLabelText('Frame strategy'), {
       target: { value: 'temporal-triad-v1' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Run VLM experiment' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Run VLM test' }))
     await waitFor(() => expect(mockedEvaluate).toHaveBeenCalledTimes(1))
     expect(mockedEvaluate.mock.calls[0][0].strategy).toBe('temporal-triad-v1')
     expect(mockedEvaluate.mock.calls[0][0].frames).toHaveLength(3)

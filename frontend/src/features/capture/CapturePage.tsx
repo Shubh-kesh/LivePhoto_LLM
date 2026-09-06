@@ -29,6 +29,7 @@ import { VlmExperimentPanel } from '../experiment/VlmExperimentPanel'
 import type { CaptureBundle } from './types/capture'
 import type { FaceDetectorProvider } from './quality/face/FaceDetectorProvider'
 import type { BundleQualityAssessment } from './quality/types/quality'
+import { runtimeConfig } from '../../lib/runtimeConfig'
 import './capture.css'
 
 type PreCameraStage = 'prepare' | 'permission'
@@ -52,6 +53,10 @@ export function CapturePage({
 
   const flow = useCaptureFlow({ onBundleReady, faceDetector, analyzeBundle })
   const isFrontCamera = flow.cameraSettings.facingMode !== 'environment'
+  // VLM experiment UI: OFF by default. Shown only on the explicit dev route (in dev builds) or
+  // when the runtime/public config enables it for UAT (M5.6 §2, §6, §84). Backend authority still
+  // applies — the panel reports "unavailable" if the backend refuses.
+  const vlmUiEnabled = (import.meta.env.DEV && experiment) || runtimeConfig.vlmExperimentUiEnabled
   const resetToPreparation = useCallback(() => {
     flow.reset()
     setStage('prepare')
@@ -119,7 +124,7 @@ export function CapturePage({
             onRetake={() => void flow.retake()}
             onUsePhoto={flow.confirm}
           />
-          {experiment && import.meta.env.DEV && flow.bundle && (
+          {vlmUiEnabled && flow.bundle && (
             <VlmExperimentPanel bundle={flow.bundle} quality={flow.qualityAssessment} />
           )}
         </>
@@ -129,7 +134,7 @@ export function CapturePage({
       content = (
         <>
           <SuccessScreen onStartOver={resetToPreparation} />
-          {experiment && import.meta.env.DEV && confirmedBundle && (
+          {vlmUiEnabled && confirmedBundle && (
             <VlmExperimentPanel bundle={confirmedBundle} quality={flow.qualityAssessment} />
           )}
         </>

@@ -1,0 +1,28 @@
+# Backend Docker build context excludes (M5.6 §49, §81).
+# Secrets, credentials, datasets, evaluation artifacts and captures must never enter an image.
+
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+.venv
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.coverage
+htmlcov
+dist
+build
+*.egg-info
+node_modules
+local-data
+artifacts
+evaluation-artifacts
+datasets
+model-assets
+test-reports
+*.log

@@ -19,11 +19,26 @@ export const vlmExperimentResultSchema = z.object({
   self_reported_confidence: z.number().nullable().optional(),
   evidence_codes: z.array(z.string()).default([]),
   latency_ms: z.number().nullable().optional(),
+  experiment_id: z.string().nullable().optional(),
   error: z.string().nullable().optional(),
 })
 
 export type VlmExperimentResult = z.infer<typeof vlmExperimentResultSchema>
 
+export const vlmProviderDescriptorSchema = z.object({
+  name: z.string(),
+  model: z.string(),
+  provider_adapter_version: z.string().optional(),
+  max_images: z.number().optional(),
+  supports_structured_output: z.boolean().optional(),
+  supports_inline_images: z.boolean().optional(),
+})
+
+export type VlmProviderDescriptor = z.infer<typeof vlmProviderDescriptorSchema>
+
 export const vlmProvidersSchema = z.object({
-  providers: z.array(z.string()),
+  experiment_enabled: z.boolean(),
+  environment: z.string().optional(),
+  providers: z.array(vlmProviderDescriptorSchema),
+  default_provider: z.string().nullable().optional(),
 })

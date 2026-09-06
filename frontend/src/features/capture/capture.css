@@ -780,3 +780,17 @@
     height: 56px;
   }
 }
+
+/* Mobile: lock the active camera to the visible viewport so the Capture button and switch are
+   always visible without vertical scrolling (M5.6 §37-41, §43-44). The hidden mount (used during
+   permission/analysis/retry) is left untouched, and desktop keeps its contained card (M5.6 §45). */
+@media (max-width: 39.99rem) {
+  .camera-screen:not(.camera-screen--hidden) {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100dvh;
+    height: 100vh;
+    overflow: hidden;
+  }
+}

@@ -55,8 +55,16 @@ class Settings(BaseSettings):
 
     hsts_enabled: bool = False
 
-    # ---- VLM experiment (M4) — development-only, disabled by default. ----
+    # ---- VLM experiment (M4, M5.6) — disabled by default. ----
     vlm_experiment_enabled: bool = False
+    # UAT local-experiment enablement: UAT experiment is available ONLY when BOTH
+    # VLM_EXPERIMENT_ENABLED=true AND VLM_UAT_LOCAL_EXPERIMENT_ENABLED=true (M5.6 §12). External
+    # providers remain blocked in UAT regardless.
+    vlm_uat_local_experiment_enabled: bool = False
+    # Structured VLM request/response/error diagnostics logging (M5.6 §27-33).
+    vlm_experiment_logging_enabled: bool = False
+    vlm_experiment_log_raw_model_text: bool = False
+
     vlm_provider: str = ""
     vlm_timeout_seconds: float = 60.0
     vlm_max_retries: int = 1
@@ -72,10 +80,34 @@ class Settings(BaseSettings):
     openrouter_api_key: SecretStr = SecretStr("")
     openrouter_model: str = ""
 
+    # ---- Self-hosted local VLM (Gemma) provider — UAT (M5.6 §15-20). ----
+    local_vlm_base_url: str = ""
+    local_vlm_model: str = ""
+    local_vlm_api_key: SecretStr = SecretStr("")
+    local_vlm_timeout_seconds: float = 60.0
+    local_vlm_max_images: int = 3
+    local_vlm_verify_tls: bool = True
+
     @property
     def vlm_experiment_available(self) -> bool:
-        """Experiment endpoint usable only when enabled AND never in uat/production (M4 §10-11)."""
-        return self.vlm_experiment_enabled and self.app_env not in ("uat", "production")
+        """Experiment availability by environment (M5.6 §11-14).
+
+        - local/test/development: available when ``vlm_experiment_enabled``.
+        - uat: available only when ``vlm_experiment_enabled`` AND
+          ``vlm_uat_local_experiment_enabled`` (local provider only).
+        - production: always unavailable (hard blocked).
+        """
+        if not self.vlm_experiment_enabled:
+            return False
+        if self.app_env == "production":
+            return False
+        if self.app_env == "uat":
+            return self.vlm_uat_local_experiment_enabled
+        return True
+
+    @property
+    def local_vlm_configured(self) -> bool:
+        return bool(self.local_vlm_base_url) and bool(self.local_vlm_model)
 
     @field_validator("cors_origins", mode="before")
     @classmethod

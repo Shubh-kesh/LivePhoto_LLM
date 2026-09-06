@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import json
+from collections.abc import Callable
 
 import httpx
 
@@ -70,6 +71,7 @@ async def call_openai_compatible(
     provider_name: str,
     frame_strategy: str | None,
     request: VisionEvaluationRequest,
+    on_raw_text: Callable[[str], None] | None = None,
 ) -> VisionEvaluationResponse:
     payload = {
         "model": model,
@@ -91,6 +93,8 @@ async def call_openai_compatible(
         raise map_provider_http_error(exc) from exc
 
     text, usage = parse_openai_response(body)
+    if on_raw_text is not None:
+        on_raw_text(text)
     assessment = parse_assessment(text)
     latency_ms = timing_ms(started_at)
     request_id = str(body.get("id")) if body.get("id") else None

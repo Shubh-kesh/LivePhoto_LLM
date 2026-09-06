@@ -4,7 +4,12 @@
  */
 
 import { apiPostMultipart, apiRequest } from '../../api/client'
-import { vlmExperimentResultSchema, vlmProvidersSchema, type VlmExperimentResult } from './schemas'
+import {
+  vlmExperimentResultSchema,
+  vlmProvidersSchema,
+  type VlmExperimentResult,
+  type VlmProviderDescriptor,
+} from './schemas'
 
 export interface VlmUploadFrame {
   blob: Blob
@@ -21,9 +26,18 @@ export interface VlmExperimentInput {
   frames: VlmUploadFrame[]
 }
 
-export async function getVlmProviders(): Promise<string[]> {
+export async function getVlmProviders(): Promise<{
+  experimentEnabled: boolean
+  defaultProvider: string | null
+  providers: VlmProviderDescriptor[]
+}> {
   const data: unknown = await apiRequest('/api/v1/experiments/vlm/providers')
-  return vlmProvidersSchema.parse(data).providers
+  const parsed = vlmProvidersSchema.parse(data)
+  return {
+    experimentEnabled: parsed.experiment_enabled,
+    defaultProvider: parsed.default_provider ?? null,
+    providers: parsed.providers,
+  }
 }
 
 export async function evaluateVlmExperiment(

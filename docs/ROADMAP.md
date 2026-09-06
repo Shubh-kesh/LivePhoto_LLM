@@ -1,9 +1,10 @@
-# LivePhoto — Roadmap (M0 Baseline, updated for M5.5)
+# LivePhoto — Roadmap (M0 Baseline, updated for M5.6)
 
-Status: **M0-M5 COMPLETE. M5.5 COMPLETE** (banking-grade guided capture UX & onboarding). M5 public
-POC baseline remains PARTIAL (quota-limited, resumable; device gates NOT COMPLETE). M6+ are planned
-and are **not implemented** in M5/M5.5. Each milestone: goal / scope / non-scope / dependencies /
-deliverables / acceptance criteria / major risks.
+Status: **M0-M5 COMPLETE. M5.5 COMPLETE. M5.6 COMPLETE** (config-gated UAT VLM UI, structured VLM
+diagnostics logging, mobile capture-button fix, backend/frontend Docker images, local Gemma API
+seam). M5 public POC baseline remains PARTIAL (quota-limited, resumable; device gates NOT
+COMPLETE). M6+ are planned and are **not implemented** in M5/M5.5/M5.6. Each milestone: goal /
+scope / non-scope / dependencies / deliverables / acceptance criteria / major risks.
 
 Dependencies and acceptance criteria reference the design docs in this repository. Milestones may
 be re-sequenced as evaluation results (M4–M9) dictate.
@@ -146,6 +147,37 @@ be re-sequenced as evaluation results (M4–M9) dictate.
   no HyperVerge assets; no remote UI assets; experiment controls off the customer path; all checks
   green (frontend lint/format/type/test/build/E2E, backend regression); docs updated; clean tree.
 - **Major risks:** None significant (UX-only; no camera-API/security changes).
+
+## M5.6 — Exceptional UAT Enablement & Diagnostic Packaging
+- **Status: COMPLETE** (config-gated VLM UI, structured VLM diagnostics logging, mobile
+  capture-button fix, Docker images, local Gemma API seam). Does not alter M6 scope.
+- **Goal:** Four operational tasks — (1) enable the existing VLM experiment in the polished UI via
+  configuration, (2) safe structured VLM request/response logging, (3) fix the mobile Capture
+  button so it is always visible without scrolling, (4) produce backend/frontend Docker images +
+  MSSQL image reference for office Artifact Registry, (5) add a self-hosted/local Gemma VLM
+  provider API path for UAT.
+- **Scope:** Runtime frontend config (`window.__LIVEPHOTO_CONFIG__` from `LIVEPHOTO_*` env,
+  Vite fallback); VLM panel on Review gated by runtime flag (OFF default, M5.5 UI unchanged when
+  off); backend env policy (uat local-only + `VLM_UAT_LOCAL_EXPERIMENT_ENABLED`, production hard
+  blocked); `LocalVisionProvider` (OpenAI-compatible chat completions) + env-aware provider
+  listing + health; structured VLM logging events + redaction + optional raw local text (8192,
+  local-only); mobile camera layout fix (fixed viewport + overflow hidden); Docker packaging
+  (backend + frontend multi-stage, non-root, SPA fallback, runtime-config gen, security headers);
+  build script + image inventory; MSSQL reference doc; docs + tests.
+- **Non-scope:** M6 detectors (YOLO/screen/print/PAD/depth/ensemble/risk); Kubernetes/Helm;
+  image pushes; Gemma runtime image; no M6 changes.
+- **Dependencies:** M5, M5.5.
+- **Deliverables:** `local_provider.py`, registry/policy updates, service logging, `runtimeConfig.ts`
+  + `public/runtime-config.js`, frontend VLM panel gating, mobile CSS fix + E2E regression,
+  `backend/Dockerfile`, `frontend/Dockerfile` + nginx + entrypoint, `scripts/build-uat-images.sh`,
+  `infrastructure/docker/{README,IMAGE_INVENTORY}.md`, `docs/{UAT_RUNTIME_CONFIGURATION,
+  LOCAL_GEMMA_INTEGRATION,VLM_EXPERIMENT_LOGGING}.md`.
+- **Acceptance criteria:** M5.6 §91-94 — backend/frontend checks green, E2E green (incl. new
+  capture-button-mobile regression), runtime-config toggle covered, images built/inspected where a
+  Docker daemon is available (not available in this dev environment — documented), docs updated,
+  clean tree. External providers blocked in uat; production hard blocked; no no-fallback in uat.
+- **Major risks:** Docker daemon unavailable locally (builds/smokes deferred to user); Gemma
+  service/GPU details still required for a real UAT deploy.
 
 ## M6 — Screen/Device/Print Detection
 - **Goal:** Detect Phase-1 static presentation attacks.
