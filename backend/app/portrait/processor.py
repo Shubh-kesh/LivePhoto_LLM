@@ -35,7 +35,7 @@ from app.transactions import (
 
 logger = get_logger("livephoto.portrait")
 
-PROCESSOR_VERSION = "portrait-processor-v2"
+PROCESSOR_VERSION = "portrait-processor-v3"
 ALPHA_REFINE_RADIUS = 1.0
 
 

@@ -1,6 +1,6 @@
 """Passport-style portrait crop (M5.7 §32-36, §59; corrected framing).
 
-Deterministic and versioned (``passport-crop-v2``). The crop intentionally preserves:
+Deterministic and versioned (``passport-crop-v3``). The crop intentionally preserves:
 
 - a top margin above the highest visible hair region (hair is never clipped),
 - visible left/right margins beside the shoulders,
@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-CROP_VERSION = "passport-crop-v2"
+CROP_VERSION = "passport-crop-v3"
 PORTRAIT_ASPECT = 3 / 4  # width / height
 
 #: Head + hair occupy roughly 50-55% of the output height (was ~60% in v1, too tight).
@@ -67,7 +67,7 @@ def passport_crop(
     image_size: tuple[int, int],
     face_box_normalized: tuple[float, float, float, float] | None = None,
 ) -> CropBox:
-    """Compute a deterministic 3:4 passport-style crop with breathing room (v2 framing).
+    """Compute a deterministic 3:4 passport-style crop (v3 framing).
 
     Pipeline: matte foreground bounds -> head + shoulder anchors -> top/side margins ->
     enforce 3:4 -> clamp to source.
@@ -119,16 +119,30 @@ def passport_crop(
         crop_top += shift
         crop_bottom += shift
 
-    # --- Horizontal: center on the subject (blend head + matte centers) ------
+    # --- Horizontal: face-centered placement with balanced shoulder framing -----
+    # Weight the crop center strongly toward the primary face midline; the matte center is a
+    # secondary guide so asymmetric hair/clothing never drags the portrait off-center (M5.7 fix).
     matte_center_x = (fg_x0 + fg_x1) // 2
-    center_x = (head_center_x + matte_center_x) // 2
-    side_margin = max(2, int(0.08 * crop_width))
-    crop_x0 = center_x - crop_width // 2
-    # Pull the frame outward so shoulders have visible side margins, when possible.
-    if crop_x0 > fg_x0 - side_margin:
-        crop_x0 = max(0, fg_x0 - side_margin)
-    if crop_x0 + crop_width < fg_x1 + side_margin:
-        crop_x0 = max(0, fg_x1 + side_margin - crop_width)
+    face_weight = 0.7
+    face_center_x = head_center_x
+    desired_center_x = round(face_weight * face_center_x + (1 - face_weight) * matte_center_x)
+
+    # Both shoulders must keep a visible minimum side margin (target ~8%, floor ~4%).
+    min_side = max(2, int(0.04 * crop_width))
+
+    # Feasible left edge that keeps both shoulder margins >= min_side.
+    lo = fg_x1 + min_side - crop_width
+    hi = fg_x0 - min_side
+    if lo <= hi:
+        # Prefer the face-centered placement, clamped into the feasible range so both shoulders
+        # stay visible with their minimum margin.
+        crop_x0 = max(lo, min(hi, desired_center_x - crop_width // 2))
+    else:
+        # Source cannot hold both minimum margins: keep face-centered, then clamp to the image.
+        crop_x0 = desired_center_x - crop_width // 2
+    crop_x0 = max(0, crop_x0)
+    if crop_x0 + crop_width > width:
+        crop_x0 = width - crop_width
     crop_x1 = crop_x0 + crop_width
 
     # --- Clamp to source while preserving 3:4 --------------------------------
@@ -148,7 +162,7 @@ def passport_crop(
     if crop_height_actual < crop_height:
         crop_height = max(12, crop_height_actual)
         crop_width = int(crop_height * PORTRAIT_ASPECT)
-        crop_x0 = center_x - crop_width // 2
+        crop_x0 = desired_center_x - crop_width // 2
         if crop_x0 < 0:
             crop_x0 = 0
         if crop_x0 + crop_width > width:

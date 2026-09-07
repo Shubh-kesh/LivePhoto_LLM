@@ -32,7 +32,7 @@ Experimental VLM `LIVE` only. Other results (`SCREEN_REPLAY`, `PRINT_ATTACK`, `Q
 decode selected original (JPEG, untouched)
 → MODNet person matting → soft alpha matte (0..1)
 → conservative edge refinement (light Gaussian on alpha)
-→ passport crop (passport-crop-v2)
+→ passport crop (passport-crop-v3)
 → solid background composite
 → high-quality JPEG encode (quality 95)
 → portrait/processed.jpg + portrait/processing.json
@@ -42,22 +42,25 @@ The matte is **soft** (not binary thresholding): semi-transparent hair edges sta
 refinement is conservative to avoid white/black halos and transparent hair holes without
 over-smoothing.
 
-## Crop framing (passport-crop-v2)
+## Crop framing (passport-crop-v3)
 
-The portrait crop intentionally preserves breathing room:
+The portrait crop intentionally preserves breathing room and horizontal balance:
 
+- **Face-centered horizontal balance** — the crop is centered primarily on the primary face
+  midline (weighted ~70% face center / ~30% subject-matte center), then the frame is sized and
+  placed so the full upper-body silhouette keeps visually balanced left/right margins. Asymmetric
+  hair volume, head angle or clothing are not over-corrected; the portrait stays natural.
 - **Top margin above the hair** — the crop boundary is placed above the highest visible
   foreground hair region (matte top), never below it, so head/hair is never clipped. Target: head +
   hair occupy ~50–55% of the output height with ~8–12% top margin.
 - **Side margins beside the shoulders** — the frame is driven by the shoulder width from the
-  matte bounds (~8% lateral breathing room on each side) rather than the face rectangle alone.
+  matte bounds (~8% lateral breathing room per side, floor ~4%), so both shoulders stay visible and
+  evenly framed.
 - **Upper shoulders** — the bottom of the frame includes the neck/upper-shoulder line.
 - **3:4 output** — deterministic and never stretched; the frame is scaled down to fit the source
   when the source cannot hold the full target frame.
-- **Anchoring** — the crop blends the primary-face center and the matte (subject) center so the
-  portrait stays naturally centered; shoulders are never flush with the crop edge.
 
-The crop is versioned (`passport-crop-v2`, processor `portrait-processor-v2`) and recorded with its
+The crop is versioned (`passport-crop-v3`, processor `portrait-processor-v3`) and recorded with its
 normalized bounds in `portrait/processing.json`.
 
 ## Hair preservation
@@ -104,6 +107,6 @@ yet; M5.7 prioritizes correctness/quality.
 - Real hair-quality validation requires a real person/photo (see manual-test section of the M5.7
   report); the development fixture is synthetic.
 - Solid background only; background modes are a future seam.
-- Crop is deterministic `passport-crop-v2` (processor `portrait-processor-v2`); reprocessing
+- Crop is deterministic `passport-crop-v3` (processor `portrait-processor-v3`); reprocessing
   writes to the same deterministic `portrait/processed.jpg` path (idempotent) and records the new
   processor/config version.

@@ -20,13 +20,34 @@ def _synthetic_alpha(width: int = 640, height: int = 800) -> np.ndarray:
     return alpha
 
 
+def _asymmetric_alpha(width: int = 640, height: int = 800) -> np.ndarray:
+    """Person whose hair/silhouette mass is asymmetric so the matte center is off the face."""
+    alpha = _synthetic_alpha(width, height)
+    yy, xx = np.mgrid[0:height, 0:width]
+    # Extra hair/silhouette volume on the right pushes the matte center right of the face.
+    bump = ((xx - 450) / 68) ** 2 + ((yy - 250) / 95) ** 2 <= 1.0
+    alpha = (alpha > 0.5) | bump
+    return alpha.astype(np.float32)
+
+
+def _matte_center_x(alpha: np.ndarray) -> int:
+    cols = np.any(alpha > 0.5, axis=0)
+    xs = np.where(cols)[0]
+    return int((xs[0] + xs[-1]) // 2)
+
+
+def _face_center_x() -> int:
+    fx, _fy, fw, _fh = _face_box()
+    return int((fx + fw / 2) * 640)
+
+
 def _face_box() -> tuple[float, float, float, float]:
     # Face sits in the upper part of the head.
     return (0.39, 0.26, 0.22, 0.24)
 
 
 def test_crop_version() -> None:
-    assert CROP_VERSION == "passport-crop-v2"
+    assert CROP_VERSION == "passport-crop-v3"
 
 
 def test_output_keeps_3x4_aspect() -> None:
@@ -85,3 +106,44 @@ def test_keeps_upper_shoulders() -> None:
     # The crop includes the shoulder line (upper shoulders); the widest shoulder edge may sit just
     # at/below the frame bottom, with hair still preserved above.
     assert crop.y1 >= fg_bottom - int(0.05 * crop.height)
+
+
+def test_face_centered_horizontal_balance_symmetric() -> None:
+    alpha = _synthetic_alpha()
+    crop = passport_crop(alpha, (640, 800), face_box_normalized=_face_box())
+    crop_center_x = crop.x0 + crop.width / 2
+    face_center_x = _face_center_x()
+    # Face midline is near the crop's horizontal center.
+    assert abs(crop_center_x - face_center_x) <= 0.04 * crop.width
+
+
+def test_asymmetric_silhouette_pulls_toward_face_not_matte() -> None:
+    alpha = _asymmetric_alpha()
+    face_center_x = _face_center_x()
+    matte_center_x = _matte_center_x(alpha)
+    # The fixture is genuinely asymmetric (matte center is off the face).
+    assert abs(matte_center_x - face_center_x) > 0.03 * alpha.shape[1]
+    crop = passport_crop(alpha, (640, 800), face_box_normalized=_face_box())
+    crop_center_x = crop.x0 + crop.width / 2
+    # The crop center is pulled toward the face: closer to the face than the matte center is.
+    assert abs(crop_center_x - face_center_x) <= 0.5 * abs(matte_center_x - face_center_x)
+    # And both shoulders remain visible (not clipped).
+    cols = np.any(alpha > 0.5, axis=0)
+    xs = np.where(cols)[0]
+    fg_x0, fg_x1 = int(xs[0]), int(xs[-1])
+    assert crop.x0 <= fg_x0 - 1
+    assert crop.x1 >= fg_x1 + 1
+
+
+def test_balanced_side_margins() -> None:
+    alpha = _synthetic_alpha()
+    crop = passport_crop(alpha, (640, 800), face_box_normalized=_face_box())
+    cols = np.any(alpha > 0.5, axis=0)
+    xs = np.where(cols)[0]
+    fg_x0, fg_x1 = int(xs[0]), int(xs[-1])
+    left_margin = fg_x0 - crop.x0
+    right_margin = crop.x1 - fg_x1
+    # Both shoulders have visible side space and the two sides feel balanced.
+    assert left_margin >= int(0.02 * crop.width)
+    assert right_margin >= int(0.02 * crop.width)
+    assert abs(left_margin - right_margin) <= int(0.06 * crop.width)
