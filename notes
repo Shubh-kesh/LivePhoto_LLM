@@ -1,0 +1,7 @@
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload --access-log --log-level debug
+
+cloudflared tunnel --url http://localhost:8000
+
+npm run dev -- --host 0.0.0.0 --force
+
+cloudflared tunnel --url http://localhost:5173
