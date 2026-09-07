@@ -97,6 +97,19 @@ viewport emulation alone (M5.5 §95, §101).
 |---|---|---|---|
 | (fill in: browser/OS/device + camera) | | | |
 
+## Closed-eye gate (M5.7)
+
+| # | Check | Expected |
+|---|---|---|
+| 1 | Eyes open | Frame eligible; capture succeeds |
+| 2 | One eye closed (wink) | That frame ineligible; another open-eye frame selected, or retry |
+| 3 | Both eyes closed | Retry with "Keep your eyes open and look at the camera." |
+| 4 | Normal blink during burst | A blink never fails the whole transaction if another open frame exists |
+| 5 | Live preview closed eyes | "Open your eyes and look at the camera." (stabilized, no raw codes) |
+| 6 | No closed-eye final frame | A closed-eye frame can never appear as Use photo's image |
+| 7 | Background person eyes | Incidental background person's eyes never affect the primary user |
+| 8 | In-memory processing | No eye images transmitted; camera privacy unchanged |
+
 ## Viewport verification results (automated/screenshot or manual)
 
 | Viewport | Horizontal overflow? | Notes |

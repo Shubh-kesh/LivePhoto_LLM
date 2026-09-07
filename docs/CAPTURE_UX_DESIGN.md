@@ -148,6 +148,25 @@ The existing M3 face guide and guidance stabilization are reused. The guide is a
 background is ensured by a scrim pill behind the single guidance message; text is never the only
 signal (guide state + check icon accompany it).
 
+## Closed-eye capture gate (M5.7)
+
+A frame with either eye closed (or unreliable eye state) can **never** become the final selected
+capture. Eye-state evaluation is **frontend-only** using MediaPipe Face Landmarker blendshapes
+(`eyeBlinkLeft`/`eyeBlinkRight`); no eye images are sent to the backend and no VLM/portrait eye
+validation exists.
+
+- **Live preview**: once the primary face is otherwise capturable but the eyes are closed, the
+  stabilized guidance shows "Open your eyes and look at the camera."
+- **Burst**: each frame is evaluated; closed-eye / unreliable frames are ineligible, and ranking
+  (`frame-ranking-v2`) selects only from eligible eyes-open frames. A normal blink therefore does
+  not fail the transaction — another open-eye frame is selected.
+- **Retry**: if no acceptable eyes-open frame exists the customer gets "Keep your eyes open and
+  look at the camera." (customer copy only; raw `EYES_CLOSED`/`EYE_STATE_UNKNOWN` codes are never
+  shown).
+- **Primary face only**: a background/incidental person's eye state never affects the primary user.
+- Eye openness is capture quality only (provisional `eye-quality-v1` thresholds), never identity,
+  emotion, health or liveness inference.
+
 ## Error UX
 
 - **Quality retry** = "Let's try again" + reason-based customer instruction (blurred → hold

@@ -91,7 +91,7 @@ describe('selectEligibleFrame', () => {
     )
     expect(result.selectedId).toBe('frame-3')
     expect(result.selectionScore).toBe(0.9)
-    expect(result.algorithmVersion).toBe('frame-ranking-v1')
+    expect(result.algorithmVersion).toBe('frame-ranking-v2')
   })
 
   it('is deterministic across calls', () => {

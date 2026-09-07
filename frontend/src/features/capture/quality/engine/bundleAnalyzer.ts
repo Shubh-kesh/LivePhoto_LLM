@@ -10,6 +10,7 @@
 import { qualityConfig, type QualityConfig } from '../config/qualityConfig'
 import type { CaptureBundle } from '../../types/capture'
 import type { FaceDetectorProvider } from '../face/FaceDetectorProvider'
+import type { EyeStateEvaluatorProvider } from '../eye/EyeStateEvaluatorProvider'
 import type {
   FrameQualityAssessment,
   BundleQualityAssessment,
@@ -51,6 +52,7 @@ export async function decodeFrameImage(blob: Blob): Promise<DecodedImage> {
 
 export interface AnalyzeBundleOptions {
   detector: FaceDetectorProvider
+  eyeEvaluator?: EyeStateEvaluatorProvider
   config?: QualityConfig
   analyzeFrame?: (options: AnalyzeFrameOptions) => Promise<FrameQualityAssessment>
   decodeFrameImage?: (blob: Blob) => Promise<DecodedImage>
@@ -97,6 +99,7 @@ export async function analyzeBundle(
       const assessment = await analyze({
         source: decoded.image,
         detector: options.detector,
+        eyeEvaluator: options.eyeEvaluator,
         frameId: frame.id,
         sequence: frame.sequence,
         config,

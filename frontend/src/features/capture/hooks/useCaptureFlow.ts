@@ -23,6 +23,8 @@ import type { CaptureBundle, CaptureDiagnostics } from '../types/capture'
 import type { SafeTrackSettings } from '../types/camera'
 import { analyzeBundle } from '../quality/engine/bundleAnalyzer'
 import { createFaceDetectorProvider } from '../quality/face/faceDetectorFactory'
+import { createEyeStateEvaluatorProvider } from '../quality/eye/eyeStateFactory'
+import type { EyeStateEvaluatorProvider } from '../quality/eye/EyeStateEvaluatorProvider'
 import type {
   FaceDetectorProvider,
   FaceDetectorProviderState,
@@ -98,6 +100,11 @@ export function useCaptureFlow(options: UseCaptureFlowOptions = {}): UseCaptureF
   if (detectorRef.current === null) {
     detectorRef.current = options.faceDetector ?? createFaceDetectorProvider()
   }
+  // Closed-eye gate runs frontend-only via the eye-state evaluator (M5.7 §19-22).
+  const eyeEvaluatorRef = useRef<EyeStateEvaluatorProvider | null>(null)
+  if (eyeEvaluatorRef.current === null) {
+    eyeEvaluatorRef.current = createEyeStateEvaluatorProvider()
+  }
 
   const [bundle, setBundle] = useState<CaptureBundle | null>(null)
   const bundleRef = useRef<CaptureBundle | null>(null)
@@ -128,7 +135,10 @@ export function useCaptureFlow(options: UseCaptureFlowOptions = {}): UseCaptureF
   analyzeBundleForFlow.current =
     options.analyzeBundle ??
     ((b: CaptureBundle) =>
-      analyzeBundle(b, { detector: detectorRef.current as FaceDetectorProvider }))
+      analyzeBundle(b, {
+        detector: detectorRef.current as FaceDetectorProvider,
+        eyeEvaluator: eyeEvaluatorRef.current as EyeStateEvaluatorProvider,
+      }))
 
   // Synchronous phase/state mirrors so async flows can read the latest phase after dispatch.
   const transition = useCallback((action: CaptureFlowAction): void => {
@@ -173,15 +183,19 @@ export function useCaptureFlow(options: UseCaptureFlowOptions = {}): UseCaptureF
   const liveQuality = useLiveQuality({
     videoRef,
     detector: detectorRef.current,
+    eyeEvaluator: eyeEvaluatorRef.current as EyeStateEvaluatorProvider,
     enabled: state.phase === 'streaming',
   })
 
-  // Detector lifecycle: initialize once per capture session; dispose on teardown (M3 §72-73).
+  // Detector + eye-evaluator lifecycle: initialize once; dispose on teardown (M3 §72-73, M5.7 §37).
   useEffect(() => {
     const detector = detectorRef.current as FaceDetectorProvider
+    const eyeEvaluator = eyeEvaluatorRef.current as EyeStateEvaluatorProvider
     detector.initialize().catch(() => undefined)
+    eyeEvaluator.initialize().catch(() => undefined)
     return () => {
       detector.dispose()
+      eyeEvaluator.dispose()
     }
   }, [])
 

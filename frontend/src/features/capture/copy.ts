@@ -155,6 +155,14 @@ const retryReasonCopy: Partial<Record<QualityReasonCode, RetryCopy>> = {
     title: 'Move closer to the camera.',
     body: 'A closer, clearer photo works better.',
   },
+  EYES_CLOSED: {
+    title: 'Keep your eyes open and look at the camera.',
+    body: 'Open eyes are needed for your photo.',
+  },
+  EYE_STATE_UNKNOWN: {
+    title: 'Please look at the camera.',
+    body: 'Keep your eyes open and look at the camera.',
+  },
 }
 
 /** Map aggregated quality reason codes to a prioritized customer-facing retry message. */
@@ -168,6 +176,8 @@ const RETRY_PRIORITY: readonly QualityReasonCode[] = [
   'BLURRED',
   'FACE_OFF_CENTER',
   'LOW_CONTRAST',
+  'EYES_CLOSED',
+  'EYE_STATE_UNKNOWN',
 ]
 
 export interface RetryCopy {

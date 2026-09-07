@@ -54,3 +54,16 @@ export interface FaceDetectorInfo {
   version: string
   modelVersion: string
 }
+
+/**
+ * Eye-state evidence for the PRIMARY face (M5.7 eye gate). Capture-quality only — NOT liveness,
+ * identity, emotion or health inference.
+ */
+export interface EyeStateEvidence {
+  /** Whether eye state could be reliably evaluated for this frame. */
+  evaluated: boolean
+  leftEyeOpen: boolean | null
+  rightEyeOpen: boolean | null
+  /** True only when evaluated AND both eyes are open (the frame is eligible for selection). */
+  eyesOpen: boolean
+}

@@ -211,6 +211,11 @@ be re-sequenced as evaluation results (M4–M9) dictate.
   absolute paths / arbitrary file serving; traversal blocked; files git-ignored; Docker mount;
   existing flows intact; no M6 spoof work; `.env.example` changes reported; tests/regressions pass;
   clean tree.
+- **M5.7 corrections:** (1) passport crop v3 framing (top hair margin, shoulder side margins,
+  face-centered horizontal balance); (2) matte refinement v2 / processor v4 (solid dark clothing
+  reinforced against tearing, hair kept soft, disconnected background removed); (3) frontend
+  closed-eye capture gate (Face Landmarker blendshapes, EYES_CLOSED reason, frame-ranking-v2,
+  blink-tolerant burst selection, customer eyes-open guidance/copy).
 - **Major risks:** Real-model hair-quality validation limited to a synthetic fixture locally; GPU
   capacity unknown; retention deferred.
 

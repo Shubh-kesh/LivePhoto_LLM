@@ -1,7 +1,9 @@
 /**
- * Deterministic frame ranking (M3 §56-58).
+ * Deterministic frame ranking (M3 §56-58, M5.7 §28).
  *
- * frame-ranking-v1: choose from eligible frames only, by:
+ * frame-ranking-v2: candidate eligibility now also requires an eyes-open primary face (EYES_CLOSED
+ * / EYE_STATE_UNKNOWN frames are INELIGIBLE and can never be selected). Selection among eligible
+ * frames, by:
  *   1. highest overallQualityScore
  *   2. higher face-detection confidence
  *   3. better (smaller) normalized center distance

@@ -31,6 +31,7 @@ Experimental VLM `LIVE` only. Other results (`SCREEN_REPLAY`, `PRINT_ATTACK`, `Q
 ```text
 decode selected original (JPEG, untouched)
 → MODNet person matting → soft alpha matte (0..1)
+→ region-aware matte refinement (matte-refinement-v2)
 → conservative edge refinement (light Gaussian on alpha)
 → passport crop (passport-crop-v3)
 → solid background composite
@@ -41,6 +42,26 @@ decode selected original (JPEG, untouched)
 The matte is **soft** (not binary thresholding): semi-transparent hair edges stay natural. Edge
 refinement is conservative to avoid white/black halos and transparent hair holes without
 over-smoothing.
+
+## Matte refinement (matte-refinement-v2)
+
+MODNet's soft alpha is ideal around hair and fine contours but can turn *solid* dark clothing into
+soft "tear" artifacts when the clothing luminance is close to the background. Refinement
+(processor `portrait-processor-v4`) distinguishes fine-edge foreground from solid-body foreground:
+
+- **Primary-person component** — a connected region anchored to the M3 primary-face box is
+  retained; disconnected background people/objects (furniture, screens, walls) are removed
+  regardless of their alpha.
+- **Body/face interior reinforcement** — inside the primary support, at/below the forehead, mid
+  alpha is pushed toward solid (0.95) so dark shirts/torsos/shoulders stay opaque against a dark
+  background.
+- **Hair band preserved** — above the forehead, the original soft MODNet alpha is kept so hair,
+  hairline and fine edges remain natural.
+- **Far background** — forced transparent; uncertain boundary bands keep soft alpha (no binary
+  thresholding of the whole mask).
+
+Numpy-only (no OpenCV/SciPy). Provisional in-code thresholds; calibration may adjust them later.
+Metadata records `matte_refinement_version: matte-refinement-v2`.
 
 ## Crop framing (passport-crop-v3)
 
@@ -60,7 +81,7 @@ The portrait crop intentionally preserves breathing room and horizontal balance:
 - **3:4 output** — deterministic and never stretched; the frame is scaled down to fit the source
   when the source cannot hold the full target frame.
 
-The crop is versioned (`passport-crop-v3`, processor `portrait-processor-v3`) and recorded with its
+The crop is versioned (`passport-crop-v3`); the overall processor is `portrait-processor-v4` with `matte-refinement-v2` and recorded with its
 normalized bounds in `portrait/processing.json`.
 
 ## Hair preservation
@@ -107,6 +128,6 @@ yet; M5.7 prioritizes correctness/quality.
 - Real hair-quality validation requires a real person/photo (see manual-test section of the M5.7
   report); the development fixture is synthetic.
 - Solid background only; background modes are a future seam.
-- Crop is deterministic `passport-crop-v3` (processor `portrait-processor-v3`); reprocessing
+- Crop is deterministic `passport-crop-v3` (processor `portrait-processor-v4`); reprocessing
   writes to the same deterministic `portrait/processed.jpg` path (idempotent) and records the new
   processor/config version.

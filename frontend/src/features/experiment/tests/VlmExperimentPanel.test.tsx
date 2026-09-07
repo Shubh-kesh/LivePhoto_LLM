@@ -59,7 +59,7 @@ function quality(): BundleQualityAssessment {
     frames: [],
     eligibleFrameIds: ['a', 'b', 'c', 'd', 'e'],
     selectedFrameId: 'c',
-    selectionAlgorithmVersion: 'frame-ranking-v1',
+    selectionAlgorithmVersion: 'frame-ranking-v2',
     disposition: 'QUALITY_READY',
     reasonCodes: [],
     totalAnalysisTimeMs: 1,

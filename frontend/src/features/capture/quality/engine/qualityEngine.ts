@@ -14,7 +14,7 @@ import type {
   QualityReasonCode,
   QualityScores,
 } from '../types/quality'
-import type { FaceMetrics } from '../types/face'
+import type { FaceMetrics, EyeStateEvidence } from '../types/face'
 import type { QualityConfig } from '../config/qualityConfig'
 import { clamp01 } from '../face/faceGeometry'
 
@@ -28,6 +28,8 @@ export const HARD_BLOCKER_REASONS: ReadonlySet<QualityReasonCode> = new Set([
   'OVEREXPOSED',
   'LOW_CONTRAST',
   'RESOLUTION_TOO_LOW',
+  'EYES_CLOSED',
+  'EYE_STATE_UNKNOWN',
   'FACE_ANALYSIS_UNAVAILABLE',
   'QUALITY_ANALYSIS_ERROR',
 ])
@@ -114,6 +116,7 @@ export function deriveReasonCodes(
   sharpness: number,
   face: FaceMetrics,
   config: QualityConfig,
+  eyeState?: EyeStateEvidence,
 ): QualityReasonCode[] {
   const reasons: QualityReasonCode[] = []
 
@@ -164,6 +167,16 @@ export function deriveReasonCodes(
   }
 
   if (contrast < config.contrast.minContrast) reasons.push('LOW_CONTRAST')
+
+  // Closed-eye capture gate (M5.7 §16-18, §27): either eye closed, or unreliable eye state, makes
+  // the frame ineligible for final selection.
+  if (eyeState) {
+    if (!eyeState.evaluated) {
+      reasons.push('EYE_STATE_UNKNOWN')
+    } else if (!eyeState.eyesOpen) {
+      reasons.push('EYES_CLOSED')
+    }
+  }
 
   return reasons
 }

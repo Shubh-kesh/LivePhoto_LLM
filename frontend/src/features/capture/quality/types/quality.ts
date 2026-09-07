@@ -8,7 +8,7 @@
  *     and NOT spoof probability (M3 §48).
  */
 
-import type { FaceMetrics } from './face'
+import type { FaceMetrics, EyeStateEvidence } from './face'
 
 export type QualityDisposition = 'QUALITY_READY' | 'QUALITY_RETRY' | 'ANALYSIS_UNAVAILABLE'
 
@@ -25,6 +25,8 @@ export type QualityReasonCode =
   | 'OVEREXPOSED'
   | 'LOW_CONTRAST'
   | 'RESOLUTION_TOO_LOW'
+  | 'EYES_CLOSED'
+  | 'EYE_STATE_UNKNOWN'
   | 'FACE_ANALYSIS_UNAVAILABLE'
   | 'QUALITY_ANALYSIS_ERROR'
 
@@ -68,6 +70,8 @@ export interface FrameQualityAssessment {
     pixelCount: number
   }
   face: FaceMetrics
+  /** Eye-state evidence for the primary face (M5.7 eye gate; capture quality only). */
+  eyeState?: EyeStateEvidence
   exposure: ExposureMetrics
   contrast: ContrastMetrics
   sharpness: SharpnessMetrics
@@ -92,4 +96,4 @@ export interface BundleQualityAssessment {
   totalAnalysisTimeMs: number
 }
 
-export const FRAME_RANKING_VERSION = 'frame-ranking-v1'
+export const FRAME_RANKING_VERSION = 'frame-ranking-v2'

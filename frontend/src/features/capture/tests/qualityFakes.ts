@@ -10,6 +10,11 @@ import type {
   FaceDetectorProvider,
   FaceDetectorProviderState,
 } from '../quality/face/FaceDetectorProvider'
+import type { EyeStateEvidence, FaceBoundingBox } from '../quality/types/face'
+import type {
+  EyeStateEvaluatorProvider,
+  EyeStateProviderState,
+} from '../quality/eye/EyeStateEvaluatorProvider'
 import type {
   BundleQualityAssessment,
   FrameQualityAssessment,
@@ -48,6 +53,44 @@ export class FakeFaceDetector implements FaceDetectorProvider {
 
   dispose(): void {
     this.disposeCalls += 1
+    this.state = 'DISPOSED'
+  }
+}
+
+export type FakeEyeMode = 'open' | 'left_closed' | 'right_closed' | 'closed' | 'unknown'
+
+/** Deterministic eye-state evaluator for tests/E2E (M5.7 §31-33). */
+export class FakeEyeStateEvaluator implements EyeStateEvaluatorProvider {
+  readonly info = { name: 'fake-eye-state', version: '0.0.1', modelVersion: 'fake-v1' }
+  state: EyeStateProviderState = 'NOT_INITIALIZED'
+  mode: FakeEyeMode = 'open'
+  evaluateCalls = 0
+
+  async initialize(): Promise<void> {
+    this.state = 'READY'
+  }
+
+  async evaluate(
+    _image: CanvasImageSource,
+    _primaryFaceBox: FaceBoundingBox,
+  ): Promise<EyeStateEvidence> {
+    this.evaluateCalls += 1
+    if (this.mode === 'unknown') {
+      return { evaluated: false, leftEyeOpen: null, rightEyeOpen: null, eyesOpen: false }
+    }
+    if (this.mode === 'left_closed') {
+      return { evaluated: true, leftEyeOpen: false, rightEyeOpen: true, eyesOpen: false }
+    }
+    if (this.mode === 'right_closed') {
+      return { evaluated: true, leftEyeOpen: true, rightEyeOpen: false, eyesOpen: false }
+    }
+    if (this.mode === 'closed') {
+      return { evaluated: true, leftEyeOpen: false, rightEyeOpen: false, eyesOpen: false }
+    }
+    return { evaluated: true, leftEyeOpen: true, rightEyeOpen: true, eyesOpen: true }
+  }
+
+  dispose(): void {
     this.state = 'DISPOSED'
   }
 }

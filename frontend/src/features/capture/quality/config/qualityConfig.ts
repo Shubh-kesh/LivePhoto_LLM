@@ -27,6 +27,16 @@ export const qualityConfig = {
     maxCenterOffsetY: 0.3,
   },
 
+  // Closed-eye capture gate (M5.7 §45). PROVISIONAL capture-quality thresholds (`eye-quality-v1`),
+  // not calibrated and not universal-accuracy claims. Eye openness is capture quality only.
+  eye: {
+    version: 'eye-quality-v1',
+    // Face Landmarker blendshape score: 0 = fully open, 1 = fully closed.
+    blinkOpenThreshold: 0.5,
+    // A frame whose eye state cannot be evaluated is never considered safe by default.
+    requireEvaluation: true,
+  },
+
   exposure: {
     minMeanLuminance: 0.25,
     maxMeanLuminance: 0.85,

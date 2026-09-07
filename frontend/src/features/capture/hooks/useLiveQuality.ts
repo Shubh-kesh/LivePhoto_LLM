@@ -15,6 +15,7 @@ import type {
   FaceDetectorProvider,
   FaceDetectorProviderState,
 } from '../quality/face/FaceDetectorProvider'
+import type { EyeStateEvaluatorProvider } from '../quality/eye/EyeStateEvaluatorProvider'
 import {
   buildLiveGuidance,
   categoryFromAssessment,
@@ -27,6 +28,7 @@ import type { FrameQualityAssessment } from '../quality/types/quality'
 export interface UseLiveQualityOptions {
   videoRef: RefObject<HTMLVideoElement | null>
   detector: FaceDetectorProvider
+  eyeEvaluator?: EyeStateEvaluatorProvider
   enabled: boolean
 }
 
@@ -41,6 +43,7 @@ export interface UseLiveQualityResult {
 export function useLiveQuality({
   videoRef,
   detector,
+  eyeEvaluator,
   enabled,
 }: UseLiveQualityOptions): UseLiveQualityResult {
   const [detectorState, setDetectorState] = useState<FaceDetectorProviderState>('NOT_INITIALIZED')
@@ -80,6 +83,7 @@ export function useLiveQuality({
       const assessment = await analyzeFrame({
         source: video,
         detector,
+        eyeEvaluator,
         frameId: 'live-preview',
         sequence: 0,
         config: qualityConfig,
@@ -102,7 +106,7 @@ export function useLiveQuality({
     } finally {
       runningRef.current = false
     }
-  }, [detector, videoRef])
+  }, [detector, eyeEvaluator, videoRef])
 
   // Throttled, backpressured analysis loop (M3 §16-18).
   useEffect(() => {

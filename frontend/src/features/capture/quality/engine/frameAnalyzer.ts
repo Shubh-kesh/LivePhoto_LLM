@@ -13,9 +13,11 @@ import { computeContrast } from '../metrics/contrast'
 import { computeExposure } from '../metrics/luminance'
 import { computeSharpness } from '../metrics/sharpness'
 import type { FaceDetectorProvider } from '../face/FaceDetectorProvider'
+import type { EyeStateEvaluatorProvider } from '../eye/EyeStateEvaluatorProvider'
+import { uncertainEyeState } from '../eye/EyeStateEvaluatorProvider'
 import { faceCenterOffset, faceCoverageRatio } from '../face/faceGeometry'
 import { participatingFaceCount, primaryFaceDetection } from '../face/faceParticipation'
-import type { FaceMetrics } from '../types/face'
+import type { EyeStateEvidence, FaceMetrics } from '../types/face'
 import type {
   FrameDisposition,
   FrameQualityAssessment,
@@ -27,6 +29,7 @@ import { deriveReasonCodes, computeComponentScores, makeMetricResult } from './q
 export interface AnalyzeFrameOptions {
   source: CanvasImageSource
   detector: FaceDetectorProvider
+  eyeEvaluator?: EyeStateEvaluatorProvider
   frameId: string
   sequence: number
   config?: QualityConfig
@@ -68,12 +71,24 @@ export async function analyzeFrame(options: AnalyzeFrameOptions): Promise<FrameQ
     faceIssue = true
   }
 
+  // Closed-eye gate: evaluate the PRIMARY face's eyes frontend-only (M5.7 §16-19). Eye state is
+  // only meaningful when a primary face was found; an unreliable evaluation is never considered
+  // safe by default (M5.7 §27).
+  let eyeState: EyeStateEvidence | undefined
+  if (face.boundingBox && options.eyeEvaluator && !faceIssue) {
+    try {
+      eyeState = await options.eyeEvaluator.evaluate(options.source, face.boundingBox)
+    } catch {
+      eyeState = uncertainEyeState()
+    }
+  }
+
   // A technical failure must never become an image-quality classification (M3 §114-115): skip
   // pixel/face-based reason derivation when analysis could not complete.
   const reasonCodes: QualityReasonCode[] =
     analysisIssue || faceIssue
       ? []
-      : deriveReasonCodes(dimensions, exposure, contrast, sharpness, face, config)
+      : deriveReasonCodes(dimensions, exposure, contrast, sharpness, face, config, eyeState)
   if (analysisIssue) reasonCodes.push('QUALITY_ANALYSIS_ERROR')
   if (faceIssue) reasonCodes.push('FACE_ANALYSIS_UNAVAILABLE')
 
@@ -97,6 +112,7 @@ export async function analyzeFrame(options: AnalyzeFrameOptions): Promise<FrameQ
       pixelCount: dimensions.width * dimensions.height,
     },
     face,
+    eyeState,
     exposure,
     contrast: { rawValue: contrast },
     sharpness: { rawValue: sharpness },

@@ -25,6 +25,7 @@ from app.portrait.errors import (
     PortraitErrorCode,
     PortraitProcessingError,
 )
+from app.portrait.matte import MATTE_REFINEMENT_VERSION, refine_matte
 from app.portrait.segmentation import OnnxPortraitSegmentation, SegmentationProvider
 from app.transactions import (
     ARTIFACT_RELATIVE_PATHS,
@@ -35,7 +36,7 @@ from app.transactions import (
 
 logger = get_logger("livephoto.portrait")
 
-PROCESSOR_VERSION = "portrait-processor-v3"
+PROCESSOR_VERSION = "portrait-processor-v4"
 ALPHA_REFINE_RADIUS = 1.0
 
 
@@ -119,6 +120,9 @@ class PortraitProcessor:
             image_bytes = self._store.read_artifact(transaction_id, source.relative_path)
             image = self._decode(image_bytes)
             alpha = self._provider().predict_alpha(image)
+            # Region-aware matte refinement: body reinforced, hair kept soft, disconnected
+            # background regions removed, primary person anchored to the face (M5.7 correction).
+            alpha = refine_matte(alpha, face_box_normalized=face_box_normalized)
             alpha = self._refine_alpha(alpha)
             crop_box = passport_crop(
                 alpha,
@@ -262,6 +266,9 @@ class PortraitProcessor:
             "status": "SUCCESS",
             "processor": "portrait-processor",
             "processor_version": PROCESSOR_VERSION,
+            "matting_model": model.get("name"),
+            "matting_model_sha256": model.get("sha256"),
+            "matte_refinement_version": MATTE_REFINEMENT_VERSION,
             "model_name": model.get("name"),
             "model_hash": model.get("sha256"),
             "source_artifact": source.relative_path,

@@ -21,6 +21,7 @@ export type GuidanceCategory =
   | 'EXPOSURE'
   | 'BLUR'
   | 'LOW_CONTRAST'
+  | 'EYES_CLOSED'
   | 'READY'
 
 export type GuideVisualState = 'neutral' | 'guidance' | 'ready'
@@ -41,6 +42,7 @@ const MESSAGES: Record<GuidanceCategory, string> = {
   EXPOSURE: 'Improve the lighting.',
   BLUR: 'Hold still.',
   LOW_CONTRAST: 'Improve the lighting.',
+  EYES_CLOSED: 'Open your eyes and look at the camera.',
   READY: 'Ready to capture.',
 }
 
@@ -61,6 +63,8 @@ const LIVE_PRIORITY: Array<{ reason: QualityReasonCode | null; category: Guidanc
   { reason: 'BLURRED', category: 'BLUR' },
   { reason: 'LOW_CONTRAST', category: 'LOW_CONTRAST' },
   { reason: 'FACE_OFF_CENTER', category: 'OFF_CENTER' },
+  { reason: 'EYES_CLOSED', category: 'EYES_CLOSED' },
+  { reason: 'EYE_STATE_UNKNOWN', category: 'EYES_CLOSED' },
 ]
 
 /** Map a live FrameQualityAssessment to the highest-priority guidance category. */
@@ -118,6 +122,8 @@ const RETRY_PRIORITY: Array<{ reason: QualityReasonCode; category: GuidanceCateg
   { reason: 'BLURRED', category: 'BLUR' },
   { reason: 'FACE_OFF_CENTER', category: 'OFF_CENTER' },
   { reason: 'LOW_CONTRAST', category: 'LOW_CONTRAST' },
+  { reason: 'EYES_CLOSED', category: 'EYES_CLOSED' },
+  { reason: 'EYE_STATE_UNKNOWN', category: 'EYES_CLOSED' },
 ]
 
 export function guidanceFromReasonCodes(reasonCodes: QualityReasonCode[]): GuidanceCategory {

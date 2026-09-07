@@ -60,6 +60,7 @@ models/
 
 # ---- Face model / MediaPipe assets (downloaded at dev setup; not committed) ----
 frontend/model-assets/face_detector.task
+frontend/model-assets/face_landmarker.task
 frontend/public/mediapipe-wasm/
 
 # ---- Portrait matting model (provisioned, pinned; not committed) ----

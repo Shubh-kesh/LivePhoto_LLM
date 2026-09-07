@@ -41,7 +41,7 @@ function qualityWith(eligibleIds: string[]): BundleQualityAssessment {
     frames: [],
     eligibleFrameIds: eligibleIds,
     selectedFrameId: eligibleIds[0],
-    selectionAlgorithmVersion: 'frame-ranking-v1',
+    selectionAlgorithmVersion: 'frame-ranking-v2',
     disposition: 'QUALITY_READY',
     reasonCodes: [],
     totalAnalysisTimeMs: 1,

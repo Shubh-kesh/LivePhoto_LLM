@@ -103,7 +103,7 @@ describe('analyzeBundle', () => {
     expect(result.eligibleFrameIds).toHaveLength(8)
     expect(result.selectedFrameId).toBe('frame-1')
     expect(result.disposition).toBe('QUALITY_READY')
-    expect(result.selectionAlgorithmVersion).toBe('frame-ranking-v1')
+    expect(result.selectionAlgorithmVersion).toBe('frame-ranking-v2')
     expect(result.qualityConfigVersion).toBe('quality-v1')
   })
 

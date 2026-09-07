@@ -10,5 +10,17 @@
     "expected_local_path": "frontend/model-assets/face_detector.task",
     "runtime_references": ["frontend/src/features/capture/quality/face/MediaPipeFaceDetector.ts"],
     "notes": "SHA-256 must be pinned here after the first trusted download (see scripts/setup-face-assets.sh and model-assets/README.md). The wasm runtime is copied from @mediapipe/tasks-vision to frontend/public/mediapipe-wasm."
+  },
+  "eye_state_model": {
+    "name": "mediapipe-face-landmarker",
+    "upstream_source": "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+    "version": "face_landmarker float16 v1 (MediaPipe tasks-vision 1.0.1)",
+    "sha256": "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff",
+    "status": "pinned",
+    "license": "Apache-2.0 (MediaPipe models)",
+    "license_source": "https://github.com/google-ai-edge/mediapipe/blob/master/LICENSE",
+    "expected_local_path": "frontend/model-assets/face_landmarker.task",
+    "runtime_references": ["frontend/src/features/capture/quality/eye/MediaPipeFaceLandmarker.ts"],
+    "notes": "Used for the M5.7 closed-eye capture gate (blendshapes). Provisioned identically to the face detector."
   }
 }

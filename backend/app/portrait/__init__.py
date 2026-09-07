@@ -4,6 +4,7 @@ from app.portrait.errors import (
     PortraitErrorCode,
     PortraitProcessingError,
 )
+from app.portrait.matte import MATTE_REFINEMENT_VERSION, refine_matte
 from app.portrait.processor import (
     PROCESSOR_VERSION,
     PortraitProcessingResult,
@@ -16,6 +17,7 @@ from app.portrait.segmentation import (
 )
 
 __all__ = [
+    "MATTE_REFINEMENT_VERSION",
     "PROCESSOR_VERSION",
     "FakePortraitSegmentation",
     "OnnxPortraitSegmentation",
@@ -24,4 +26,5 @@ __all__ = [
     "PortraitProcessingResult",
     "PortraitProcessor",
     "SegmentationProvider",
+    "refine_matte",
 ]
