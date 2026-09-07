@@ -188,7 +188,8 @@ be re-sequenced as evaluation results (M4–M9) dictate.
   created first, atomic JSON metadata, artifact references + SHA-256, path/symlink confinement;
   transaction API (create, controlled artifact read, LIVE-gated portrait trigger); VLM result
   persistence (`vlm/result.json`) on evaluate; backend portrait processor (MODNet ONNX via
-  onnxruntime, soft alpha, passport-crop-v1 3:4, solid background, JPEG 95, deterministic output,
+  onnxruntime, soft alpha, passport-crop-v2 3:4 with hair/shoulder margins, solid background,
+  JPEG 95, deterministic output,
   idempotent, per-transaction status lifecycle); model provisioning script + pinned SHA-256;
   frontend face-participation heuristics (2+ participating faces → MULTIPLE_FACES; background faces
   ignored); VLM panel LIVE → "Preparing final photo…" → processed portrait below the VLM result
