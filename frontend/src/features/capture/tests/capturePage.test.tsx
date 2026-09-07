@@ -8,12 +8,44 @@
  */
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { CapturePage } from '../CapturePage'
 import { setupMediaEnvironment, type MediaEnvironment } from './mediaFakes'
 import { FakeFaceDetector, readyBundleAssessment, retryBundleAssessment } from './qualityFakes'
+import { getVlmProviders } from '../../experiment/api'
 import type { CaptureBundle } from '../types/capture'
+
+vi.mock('../../experiment/api', () => ({
+  getVlmProviders: vi.fn(),
+  evaluateVlmExperiment: vi.fn(),
+}))
+
+const mockedProviders = vi.mocked(getVlmProviders)
+
+const ORIGINAL_CONFIG = { ...window.__LIVEPHOTO_CONFIG__ }
+
+function setVlmUiConfig(enabled: boolean): void {
+  ;(window as { __LIVEPHOTO_CONFIG__?: Record<string, unknown> }).__LIVEPHOTO_CONFIG__ = {
+    ...(window.__LIVEPHOTO_CONFIG__ ?? {}),
+    vlmExperimentUiEnabled: enabled,
+  }
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  mockedProviders.mockResolvedValue({
+    experimentEnabled: true,
+    defaultProvider: 'mock',
+    providers: [{ name: 'mock', model: 'mock-vision-v1' }],
+  })
+  if (ORIGINAL_CONFIG === undefined) {
+    delete (window as { __LIVEPHOTO_CONFIG__?: Record<string, unknown> }).__LIVEPHOTO_CONFIG__
+  } else {
+    ;(window as { __LIVEPHOTO_CONFIG__?: Record<string, unknown> }).__LIVEPHOTO_CONFIG__ =
+      ORIGINAL_CONFIG
+  }
+})
 
 function renderCapturePage(options: { retryOnFirst?: boolean } = {}) {
   let calls = 0
@@ -189,5 +221,53 @@ describe('CapturePage M5.5 journey', () => {
       expect(screen.getByRole('heading', { name: 'Prepare for your photo' })).toBeInTheDocument(),
     )
     expect(track.stopCount()).toBeGreaterThan(0)
+  })
+
+  it('renders VLM diagnostics inside the Review screen when enabled (M5.6 correction)', async () => {
+    const env = setupMediaEnvironment()
+    setVlmUiConfig(true)
+    renderCapturePage()
+    await reachCamera(env)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Capture photo' }))
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Use photo' })).toBeInTheDocument(),
+    )
+
+    // Review screen is rendered with the VLM test control.
+    expect(screen.getByRole('heading', { name: 'Your photo' })).toBeInTheDocument()
+    expect(screen.getByText('VLM test')).toBeInTheDocument()
+
+    // Structural fix: the VLM panel lives INSIDE the Review screen content, not after a
+    // full-viewport sibling (the reported bug was placement after .lp-screen min-height:100dvh).
+    const reviewScreen = document.querySelector('.lp-screen')
+    expect(reviewScreen).not.toBeNull()
+    expect(reviewScreen?.querySelector('.vlm-experiment')).not.toBeNull()
+
+    // Success stays clean: no VLM diagnostics after Use photo (M5.6 correction §7).
+    fireEvent.click(screen.getByRole('button', { name: 'Use photo' }))
+    await waitFor(() =>
+      expect(
+        screen.getByRole('heading', { name: 'Photo captured successfully' }),
+      ).toBeInTheDocument(),
+    )
+    expect(screen.queryByText('VLM test')).not.toBeInTheDocument()
+  })
+
+  it('keeps the Review flow VLM-free when the experiment UI is disabled', async () => {
+    const env = setupMediaEnvironment()
+    setVlmUiConfig(false)
+    renderCapturePage()
+    await reachCamera(env)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Capture photo' }))
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Use photo' })).toBeInTheDocument(),
+    )
+
+    // Normal M5.5 Review: no VLM test, no diagnostics slot content.
+    expect(screen.getByRole('heading', { name: 'Your photo' })).toBeInTheDocument()
+    expect(screen.queryByText('VLM test')).not.toBeInTheDocument()
+    expect(document.querySelector('.vlm-experiment')).toBeNull()
   })
 })

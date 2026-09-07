@@ -29,7 +29,7 @@ import { VlmExperimentPanel } from '../experiment/VlmExperimentPanel'
 import type { CaptureBundle } from './types/capture'
 import type { FaceDetectorProvider } from './quality/face/FaceDetectorProvider'
 import type { BundleQualityAssessment } from './quality/types/quality'
-import { runtimeConfig } from '../../lib/runtimeConfig'
+import { readRuntimeConfig } from '../../lib/runtimeConfig'
 import './capture.css'
 
 type PreCameraStage = 'prepare' | 'permission'
@@ -46,17 +46,15 @@ export function CapturePage({
 }) {
   const [stage, setStage] = useState<PreCameraStage>('prepare')
   const [helpOpen, setHelpOpen] = useState(false)
-  const [confirmedBundle, setConfirmedBundle] = useState<CaptureBundle | null>(null)
-  const onBundleReady = useCallback((bundle: CaptureBundle) => {
-    setConfirmedBundle(bundle)
-  }, [])
 
-  const flow = useCaptureFlow({ onBundleReady, faceDetector, analyzeBundle })
+  const flow = useCaptureFlow({ faceDetector, analyzeBundle })
   const isFrontCamera = flow.cameraSettings.facingMode !== 'environment'
   // VLM experiment UI: OFF by default. Shown only on the explicit dev route (in dev builds) or
   // when the runtime/public config enables it for UAT (M5.6 §2, §6, §84). Backend authority still
   // applies — the panel reports "unavailable" if the backend refuses.
-  const vlmUiEnabled = (import.meta.env.DEV && experiment) || runtimeConfig.vlmExperimentUiEnabled
+  const vlmUiEnabled =
+    (import.meta.env.DEV && experiment) || readRuntimeConfig().vlmExperimentUiEnabled
+
   const resetToPreparation = useCallback(() => {
     flow.reset()
     setStage('prepare')
@@ -118,27 +116,20 @@ export function CapturePage({
       break
     case 'preview':
       content = flow.previewUrl ? (
-        <>
-          <ReviewScreen
-            previewUrl={flow.previewUrl}
-            onRetake={() => void flow.retake()}
-            onUsePhoto={flow.confirm}
-          />
-          {vlmUiEnabled && flow.bundle && (
-            <VlmExperimentPanel bundle={flow.bundle} quality={flow.qualityAssessment} />
-          )}
-        </>
+        <ReviewScreen
+          previewUrl={flow.previewUrl}
+          onRetake={() => void flow.retake()}
+          onUsePhoto={flow.confirm}
+          diagnostics={
+            vlmUiEnabled && flow.bundle ? (
+              <VlmExperimentPanel bundle={flow.bundle} quality={flow.qualityAssessment} />
+            ) : undefined
+          }
+        />
       ) : null
       break
     case 'confirmed':
-      content = (
-        <>
-          <SuccessScreen onStartOver={resetToPreparation} />
-          {vlmUiEnabled && confirmedBundle && (
-            <VlmExperimentPanel bundle={confirmedBundle} quality={flow.qualityAssessment} />
-          )}
-        </>
-      )
+      content = <SuccessScreen onStartOver={resetToPreparation} />
       break
     case 'error':
       content = flow.error ? (

@@ -26,9 +26,9 @@ afterEach(() => {
 })
 
 describe('readRuntimeConfig', () => {
-  it('falls back to defaults when no runtime config is present', () => {
+  it('falls back to safe defaults when no runtime config or Vite value is present', () => {
     setWindowConfig(undefined)
-    const config = readRuntimeConfig()
+    const config = readRuntimeConfig({})
     expect(config.apiBaseUrl).toBeTruthy()
     expect(config.appEnv).toBeTruthy()
     expect(config.vlmExperimentUiEnabled).toBe(false)
@@ -55,8 +55,38 @@ describe('readRuntimeConfig', () => {
 
   it('empty runtime strings fall back to defaults', () => {
     setWindowConfig({ appEnv: '', apiBaseUrl: '', vlmExperimentUiEnabled: false })
-    const config = readRuntimeConfig()
+    const config = readRuntimeConfig({})
     expect(config.appEnv).toBeTruthy()
     expect(config.apiBaseUrl).toBeTruthy()
+  })
+})
+
+describe('readRuntimeConfig VLM flag precedence (M5.6 correction)', () => {
+  it('runtime empty + Vite true => true (local dev fallback)', () => {
+    setWindowConfig({ vlmExperimentUiEnabled: '' })
+    expect(
+      readRuntimeConfig({ VITE_VLM_EXPERIMENT_UI_ENABLED: 'true' }).vlmExperimentUiEnabled,
+    ).toBe(true)
+  })
+
+  it('runtime empty + Vite false => false', () => {
+    setWindowConfig({ vlmExperimentUiEnabled: '' })
+    expect(
+      readRuntimeConfig({ VITE_VLM_EXPERIMENT_UI_ENABLED: 'false' }).vlmExperimentUiEnabled,
+    ).toBe(false)
+  })
+
+  it('runtime true + Vite false => true (Docker UAT enabled wins)', () => {
+    setWindowConfig({ vlmExperimentUiEnabled: true })
+    expect(
+      readRuntimeConfig({ VITE_VLM_EXPERIMENT_UI_ENABLED: 'false' }).vlmExperimentUiEnabled,
+    ).toBe(true)
+  })
+
+  it('runtime false + Vite true => false (explicit Docker disable wins)', () => {
+    setWindowConfig({ vlmExperimentUiEnabled: false })
+    expect(
+      readRuntimeConfig({ VITE_VLM_EXPERIMENT_UI_ENABLED: 'true' }).vlmExperimentUiEnabled,
+    ).toBe(false)
   })
 })

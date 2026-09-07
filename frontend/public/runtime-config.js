@@ -8,5 +8,7 @@
 window.__LIVEPHOTO_CONFIG__ = {
   appEnv: '',
   apiBaseUrl: '',
-  vlmExperimentUiEnabled: false,
+  // Empty string (not a boolean) so a local Vite dev build can fall back to
+  // VITE_VLM_EXPERIMENT_UI_ENABLED. The Docker entrypoint replaces this with a real boolean.
+  vlmExperimentUiEnabled: '',
 }

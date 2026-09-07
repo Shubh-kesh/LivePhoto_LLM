@@ -31,11 +31,13 @@ function strValue(value: unknown, fallback: string): string {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback
 }
 
-export function readRuntimeConfig(): RuntimeConfig {
+export function readRuntimeConfig(env: Record<string, unknown> = import.meta.env): RuntimeConfig {
   const cfg = (typeof window !== 'undefined' ? window.__LIVEPHOTO_CONFIG__ : undefined) ?? {}
-  const env = import.meta.env
-  const apiBaseUrl = strValue(cfg.apiBaseUrl, env.VITE_API_BASE_URL || 'http://localhost:8000')
-  const appEnv = strValue(cfg.appEnv, env.VITE_APP_ENV || 'development')
+  const apiBaseUrl = strValue(
+    cfg.apiBaseUrl,
+    strValue(env.VITE_API_BASE_URL, 'http://localhost:8000'),
+  )
+  const appEnv = strValue(cfg.appEnv, strValue(env.VITE_APP_ENV, 'development'))
   const vlmExperimentUiEnabled = boolValue(
     cfg.vlmExperimentUiEnabled,
     boolValue(env.VITE_VLM_EXPERIMENT_UI_ENABLED, false),
