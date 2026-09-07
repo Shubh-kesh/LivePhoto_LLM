@@ -17,7 +17,14 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.portrait.errors import PortraitProcessingError
 from app.providers.vision.errors import VlmError, VlmErrorCode
+from app.transactions import (
+    ArtifactNotFoundError,
+    TransactionExistsError,
+    TransactionPathError,
+    TransactionStorageError,
+)
 
 logger = logging.getLogger("livephoto.errors")
 
@@ -104,6 +111,51 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=status,
             content=_envelope(request, exc.code.value, exc.message, status),
+        )
+
+    @app.exception_handler(TransactionPathError)
+    async def _handle_transaction_path(request: Request, exc: TransactionPathError) -> Any:
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            status_code=400,
+            content=_envelope(request, "INVALID_TRANSACTION", "Invalid transaction reference", 400),
+        )
+
+    @app.exception_handler(ArtifactNotFoundError)
+    async def _handle_artifact_not_found(request: Request, exc: ArtifactNotFoundError) -> Any:
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            status_code=404,
+            content=_envelope(request, "ARTIFACT_NOT_FOUND", "Artifact not found", 404),
+        )
+
+    @app.exception_handler(TransactionExistsError)
+    async def _handle_transaction_exists(request: Request, exc: TransactionExistsError) -> Any:
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            status_code=409,
+            content=_envelope(request, "TRANSACTION_EXISTS", "Transaction already exists", 409),
+        )
+
+    @app.exception_handler(TransactionStorageError)
+    async def _handle_transaction_storage(request: Request, exc: TransactionStorageError) -> Any:
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            status_code=500,
+            content=_envelope(request, "TECHNICAL_ERROR", "Transaction storage error", 500),
+        )
+
+    @app.exception_handler(PortraitProcessingError)
+    async def _handle_portrait_error(request: Request, exc: PortraitProcessingError) -> Any:
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            status_code=500,
+            content=_envelope(request, exc.code.value, "We couldn't prepare your photo.", 500),
         )
 
     @app.exception_handler(StarletteHTTPException)

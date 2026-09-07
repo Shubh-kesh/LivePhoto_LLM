@@ -35,6 +35,8 @@ export interface FaceDetectionResult {
 /** Aggregated per-frame face metrics used by the quality engine (M3 §21-25). */
 export interface FaceMetrics {
   count: number
+  /** Count of participating (substantial + central) faces (M5.7 §28-30). */
+  participatingCount?: number
   detectionConfidence?: number
   boundingBox?: FaceBoundingBox
   normalizedBoundingBox?: FaceBoundingBox

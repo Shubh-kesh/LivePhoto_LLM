@@ -15,7 +15,13 @@ import { captureConfig } from '../capture/config/captureConfig'
 import { qualityConfig } from '../capture/quality/config/qualityConfig'
 import type { CaptureBundle } from '../capture/types/capture'
 import type { BundleQualityAssessment } from '../capture/quality/types/quality'
-import { evaluateVlmExperiment, getVlmProviders } from './api'
+import {
+  createTransaction,
+  evaluateVlmExperiment,
+  getVlmProviders,
+  processPortrait,
+  transactionArtifactUrl,
+} from './api'
 import { selectFramesForStrategy, type ExperimentFrameStrategy } from './frameSelection'
 import type { VlmExperimentResult, VlmProviderDescriptor } from './schemas'
 import './vlm-panel.css'
@@ -47,6 +53,11 @@ export function VlmExperimentPanel({ bundle, quality }: VlmExperimentPanelProps)
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState<VlmExperimentResult | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [transactionId, setTransactionId] = useState<string | null>(null)
+  const [portraitState, setPortraitState] = useState<'idle' | 'processing' | 'ready' | 'error'>(
+    'idle',
+  )
+  const [processedUrl, setProcessedUrl] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -71,12 +82,42 @@ export function VlmExperimentPanel({ bundle, quality }: VlmExperimentPanelProps)
     [bundle, quality, strategy],
   )
 
+  // The representative capture is the M5.7 selected-original source (M5.7 §17).
+  const representativeFrame = useMemo(
+    () =>
+      bundle.frames.find((frame) => frame.id === bundle.representativeFrameId) ??
+      bundle.frames[0] ??
+      null,
+    [bundle],
+  )
+
+  const faceBoxNormalized = useMemo(() => {
+    if (!quality?.selectedFrameId) return undefined
+    const frame = quality.frames.find((f) => f.frameId === quality.selectedFrameId)
+    const box = frame?.face.normalizedBoundingBox
+    if (!box) return undefined
+    return `${box.x},${box.y},${box.width},${box.height}`
+  }, [quality])
+
   const run = useCallback(async () => {
     if (!provider || selectedFrames.length === 0) return
     setRunning(true)
     setErrorMessage(null)
     setResult(null)
+    setPortraitState('idle')
+    setProcessedUrl(null)
     try {
+      // Transaction folder is created FIRST; every artifact lives under it (M5.7 §2).
+      let txId = transactionId
+      if (!txId && representativeFrame) {
+        const created = await createTransaction(
+          representativeFrame.blob,
+          captureConfig.configVersion,
+          qualityConfig.configVersion,
+        )
+        txId = created.transactionId
+        setTransactionId(txId)
+      }
       const outcome = await evaluateVlmExperiment({
         strategy,
         captureConfigVersion: captureConfig.configVersion,
@@ -84,12 +125,25 @@ export function VlmExperimentPanel({ bundle, quality }: VlmExperimentPanelProps)
         frameSelectionVersion: strategy,
         provider,
         mockBehavior: provider === 'mock' ? mockBehavior : undefined,
+        transactionId: txId ?? undefined,
         frames: selectedFrames.map((frame, index) => ({
           blob: frame.blob,
           filename: `frame-${index}.jpg`,
         })),
       })
       setResult(outcome)
+
+      // Experimental LIVE trigger for the portrait pipeline (M5.7 §21). Diagnostic only.
+      if (outcome.classification === 'LIVE' && txId) {
+        setPortraitState('processing')
+        try {
+          await processPortrait(txId, faceBoxNormalized)
+          setProcessedUrl(transactionArtifactUrl(txId, 'PROCESSED_PORTRAIT'))
+          setPortraitState('ready')
+        } catch {
+          setPortraitState('error')
+        }
+      }
     } catch (error) {
       setErrorMessage(
         error instanceof ApiClientError
@@ -99,7 +153,15 @@ export function VlmExperimentPanel({ bundle, quality }: VlmExperimentPanelProps)
     } finally {
       setRunning(false)
     }
-  }, [provider, strategy, mockBehavior, selectedFrames])
+  }, [
+    provider,
+    strategy,
+    mockBehavior,
+    selectedFrames,
+    transactionId,
+    representativeFrame,
+    faceBoxNormalized,
+  ])
 
   if (unavailable) {
     return (
@@ -230,6 +292,32 @@ export function VlmExperimentPanel({ bundle, quality }: VlmExperimentPanelProps)
             <dd>{result.experiment_id ?? 'n/a'}</dd>
           </div>
         </dl>
+      )}
+
+      {/* M5.7: experimental LIVE trigger — processed portrait preview (diagnostic only). */}
+      {portraitState === 'processing' && (
+        <p
+          className="vlm-experiment__portrait-status"
+          role="status"
+          data-testid="portrait-processing"
+        >
+          Preparing final photo…
+        </p>
+      )}
+      {portraitState === 'ready' && processedUrl && (
+        <section className="vlm-experiment__portrait" data-testid="processed-portrait">
+          <h3 className="vlm-experiment__portrait-title">Final photo</h3>
+          <img
+            className="vlm-experiment__portrait-image"
+            src={processedUrl}
+            alt="Processed portrait preview"
+          />
+        </section>
+      )}
+      {portraitState === 'error' && (
+        <p className="vlm-experiment__error" role="alert" data-testid="portrait-error">
+          We couldn't prepare your photo. Please try again.
+        </p>
       )}
     </details>
   )

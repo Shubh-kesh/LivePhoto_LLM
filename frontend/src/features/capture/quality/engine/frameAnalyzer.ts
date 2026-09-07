@@ -14,6 +14,7 @@ import { computeExposure } from '../metrics/luminance'
 import { computeSharpness } from '../metrics/sharpness'
 import type { FaceDetectorProvider } from '../face/FaceDetectorProvider'
 import { faceCenterOffset, faceCoverageRatio } from '../face/faceGeometry'
+import { participatingFaceCount, primaryFaceDetection } from '../face/faceParticipation'
 import type { FaceMetrics } from '../types/face'
 import type {
   FrameDisposition,
@@ -61,7 +62,7 @@ export async function analyzeFrame(options: AnalyzeFrameOptions): Promise<FrameQ
   let faceIssue = false
   try {
     const result = await options.detector.detect(options.source)
-    face = buildFaceMetrics(result.detections)
+    face = buildFaceMetrics(result.detections, config)
   } catch {
     face = { count: 0 }
     faceIssue = true
@@ -115,17 +116,37 @@ function safeSourceDimensions(source: CanvasImageSource): { width: number; heigh
   }
 }
 
-function buildFaceMetrics(detections: import('../types/face').FaceDetection[]): FaceMetrics {
-  if (detections.length === 0) return { count: 0 }
-  if (detections.length > 1) return { count: detections.length }
-  const detection = detections[0]
-  const coverageRatio = faceCoverageRatio(detection.normalizedBoundingBox)
-  const centerOffset = faceCenterOffset(detection.normalizedBoundingBox)
+function buildFaceMetrics(
+  detections: import('../types/face').FaceDetection[],
+  config: QualityConfig,
+): FaceMetrics {
+  if (detections.length === 0) return { count: 0, participatingCount: 0 }
+  const participating = participatingFaceCount(detections, config)
+  if (detections.length === 1) {
+    const detection = detections[0]
+    const coverageRatio = faceCoverageRatio(detection.normalizedBoundingBox)
+    const centerOffset = faceCenterOffset(detection.normalizedBoundingBox)
+    return {
+      count: 1,
+      participatingCount: participating,
+      detectionConfidence: detection.confidence,
+      boundingBox: detection.boundingBox,
+      normalizedBoundingBox: detection.normalizedBoundingBox,
+      coverageRatio,
+      centerOffset,
+    }
+  }
+  // Multiple detections: retain the primary (participating) face for single-face checks; small
+  // peripheral faces are background and must not force rejection (M5.7 §28-30).
+  const primary = primaryFaceDetection(detections, config) ?? detections[0]
+  const coverageRatio = faceCoverageRatio(primary.normalizedBoundingBox)
+  const centerOffset = faceCenterOffset(primary.normalizedBoundingBox)
   return {
-    count: 1,
-    detectionConfidence: detection.confidence,
-    boundingBox: detection.boundingBox,
-    normalizedBoundingBox: detection.normalizedBoundingBox,
+    count: detections.length,
+    participatingCount: participating,
+    detectionConfidence: primary.confidence,
+    boundingBox: primary.boundingBox,
+    normalizedBoundingBox: primary.normalizedBoundingBox,
     coverageRatio,
     centerOffset,
   }

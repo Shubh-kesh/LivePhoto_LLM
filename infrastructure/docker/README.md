@@ -30,6 +30,11 @@ See `IMAGE_INVENTORY.md` for the pinned inventory (base images, digests, version
 Backend:
 ```bash
 docker run --rm -p 8000:8000 \
+  -v "$(pwd)/backend/local-data/file-storage:/data/livephoto" \
+  -v "$(pwd)/backend/model-assets:/app/model-assets:ro" \
+  -e FILE_STORAGE_ROOT=/data/livephoto \
+  -e PORTRAIT_PROCESSING_ENABLED=true \
+  -e PORTRAIT_MODEL_PATH=/app/model-assets/modnet_photographic_portrait_matting.onnx \
   -e APP_ENV=uat \
   -e VLM_EXPERIMENT_ENABLED=true \
   -e VLM_UAT_LOCAL_EXPERIMENT_ENABLED=true \
@@ -40,6 +45,10 @@ docker run --rm -p 8000:8000 \
 curl http://localhost:8000/health/live
 curl http://localhost:8000/health/ready
 ```
+
+Transaction artifacts are written to the mounted `FILE_STORAGE_ROOT` (never baked into the image).
+The portrait model asset is mounted read-only (provisioned, not baked; see
+`docs/PORTRAIT_PROCESSING.md`).
 
 Frontend (with VLM test UI enabled, no rebuild):
 ```bash

@@ -1,10 +1,11 @@
-# LivePhoto — Roadmap (M0 Baseline, updated for M5.6)
+# LivePhoto — Roadmap (M0 Baseline, updated for M5.7)
 
-Status: **M0-M5 COMPLETE. M5.5 COMPLETE. M5.6 COMPLETE** (config-gated UAT VLM UI, structured VLM
-diagnostics logging, mobile capture-button fix, backend/frontend Docker images, local Gemma API
-seam). M5 public POC baseline remains PARTIAL (quota-limited, resumable; device gates NOT
-COMPLETE). M6+ are planned and are **not implemented** in M5/M5.5/M5.6. Each milestone: goal /
-scope / non-scope / dependencies / deliverables / acceptance criteria / major risks.
+Status: **M0-M5 COMPLETE. M5.5 COMPLETE. M5.6 COMPLETE. M5.7 COMPLETE** (transaction-scoped
+filesystem storage, LIVE-triggered portrait matting + passport crop + configurable background,
+processed-photo preview in the VLM panel). M5 public POC baseline remains PARTIAL (quota-limited,
+resumable; device gates NOT COMPLETE). M6+ are planned and are **not implemented** in M5/M5.5/M5.6/
+M5.7. Each milestone: goal / scope / non-scope / dependencies / deliverables / acceptance criteria
+/ major risks.
 
 Dependencies and acceptance criteria reference the design docs in this repository. Milestones may
 be re-sequenced as evaluation results (M4–M9) dictate.
@@ -178,6 +179,39 @@ be re-sequenced as evaluation results (M4–M9) dictate.
   clean tree. External providers blocked in uat; production hard blocked; no no-fallback in uat.
 - **Major risks:** Docker daemon unavailable locally (builds/smokes deferred to user); Gemma
   service/GPU details still required for a real UAT deploy.
+
+## M5.7 — LIVE Portrait Processing & Transaction File Storage
+- **Status: COMPLETE.**
+- **Goal:** Transaction-scoped filesystem storage; high-quality backend person matting + passport
+  crop + configurable background; processed-photo preview after an experimental LIVE VLM result.
+- **Scope:** Filesystem transaction store (`TransactionFileStore`, no GCS/S3), transaction folder
+  created first, atomic JSON metadata, artifact references + SHA-256, path/symlink confinement;
+  transaction API (create, controlled artifact read, LIVE-gated portrait trigger); VLM result
+  persistence (`vlm/result.json`) on evaluate; backend portrait processor (MODNet ONNX via
+  onnxruntime, soft alpha, passport-crop-v1 3:4, solid background, JPEG 95, deterministic output,
+  idempotent, per-transaction status lifecycle); model provisioning script + pinned SHA-256;
+  frontend face-participation heuristics (2+ participating faces → MULTIPLE_FACES; background faces
+  ignored); VLM panel LIVE → "Preparing final photo…" → processed portrait below the VLM result
+  (failure → customer-safe technical error); structured portrait/transaction logging; storage
+  readiness check; docs.
+- **Non-scope:** M6 spoof models; retention/purge policy; non-solid backgrounds; database artifact
+  tables (filesystem only, no MSSQL dependency); Gemma inference image.
+- **Dependencies:** M5.5, M5.6 (VLM panel), M3 (primary face anchor).
+- **Deliverables:** `app/transactions/`, `app/portrait/`, transaction API + VLM-result persistence,
+  `backend/scripts/provision-portrait-model.sh`, face-participation heuristics, frontend portrait
+  UI + tests, `docs/{TRANSACTION_FILE_STORAGE,PORTRAIT_PROCESSING}.md`, updated env examples /
+  Docker / UAT docs.
+- **Acceptance criteria:** M5.7 §116 (1-33) — transaction folder first; filesystem storage local +
+  mounted UAT/prod; no GCS; original persisted + never overwritten; VLM result persisted; LIVE-only
+  trigger; backend matting with hair preserved; background people/objects removed; primary subject
+  retained; background faces don't force rejection; 2+ participating faces rejected; passport crop
+  3:4 without head/hair clipping; shoulders visible; configurable white background; typed failure
+  with no silent fallback; processed portrait under transaction folder; controlled artifact API; no
+  absolute paths / arbitrary file serving; traversal blocked; files git-ignored; Docker mount;
+  existing flows intact; no M6 spoof work; `.env.example` changes reported; tests/regressions pass;
+  clean tree.
+- **Major risks:** Real-model hair-quality validation limited to a synthetic fixture locally; GPU
+  capacity unknown; retention deferred.
 
 ## M6 — Screen/Device/Print Detection
 - **Goal:** Detect Phase-1 static presentation attacks.

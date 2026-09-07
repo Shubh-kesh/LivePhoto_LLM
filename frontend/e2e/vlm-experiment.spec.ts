@@ -61,3 +61,27 @@ test('quality-ready capture -> VLM provider timeout -> safe error', async ({ pag
   await expect(page.getByRole('alert')).toContainText('PROVIDER_TIMEOUT', { timeout: 20_000 })
   await expect(page.locator('.vlm-experiment__result')).not.toContainText('SCREEN_REPLAY')
 })
+
+test('quality-ready capture -> LIVE -> portrait processing -> final photo (M5.7 §67-69)', async ({
+  page,
+}) => {
+  await page.addInitScript((config) => {
+    ;(globalThis as { __LIVEPHOTO_FACE_STUB__?: unknown }).__LIVEPHOTO_FACE_STUB__ = config
+  }, GOOD)
+
+  await reachPreview(page)
+  await openPanel(page)
+  await page.getByLabel('Mock behavior (test builds)').selectOption('live')
+  await page.getByRole('button', { name: 'Run VLM test' }).click()
+
+  // LIVE result is shown, then the portrait pipeline runs and the final photo appears below.
+  await expect(page.getByRole('img', { name: 'Processed portrait preview' })).toBeVisible({
+    timeout: 20_000,
+  })
+  await expect(page.getByText('Final photo')).toBeVisible()
+  // The processed portrait is below the VLM result inside the panel.
+  await expect(page.locator('.vlm-experiment__result')).toContainText('LIVE')
+  // No verification wording.
+  const body = await page.locator('body').textContent()
+  expect(body ?? '').not.toMatch(/verified|identity verified|You passed/i)
+})

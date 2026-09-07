@@ -9,12 +9,14 @@
 from __future__ import annotations
 
 import io
+import json
+from datetime import UTC
 from typing import Any, cast
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
 
 from app.core.config import Settings
-from app.experiments.vlm import ExperimentEvaluateRequest, VlmEvaluationService
+from app.experiments.vlm import ExperimentEvaluateRequest, ExperimentResult, VlmEvaluationService
 from app.experiments.vlm.frame_selection import FRAME_STRATEGIES, is_supported_strategy
 from app.providers.vision import (
     VlmError,
@@ -115,6 +117,7 @@ async def evaluate_vlm(
     quality_config_version: str = Form(""),
     frame_selection_version: str = Form(""),
     mock_behavior: str = Form(""),
+    transaction_id: str = Form(""),
     frames: list[UploadFile] = File(...),  # noqa: B008
 ) -> Any:
     _guard(request)
@@ -152,4 +155,61 @@ async def evaluate_vlm(
     )
 
     service = VlmEvaluationService(settings)
-    return await service.evaluate(experiment_request)
+    result = await service.evaluate(experiment_request)
+
+    payload: dict[str, Any] = result.model_dump()
+    if transaction_id:
+        await _persist_vlm_result(request, settings, transaction_id, result)
+        payload["transaction_id"] = transaction_id
+
+    return payload
+
+
+async def _persist_vlm_result(
+    request: Request,
+    settings: Settings,
+    transaction_id: str,
+    result: ExperimentResult,
+) -> None:
+    """Persist a normalized, safe VLM result under the transaction folder (M5.7 §20)."""
+    from datetime import datetime
+
+    from app.transactions import (
+        ArtifactNotFoundError,
+        ArtifactType,
+        TransactionFileStore,
+        TransactionStorageError,
+        is_valid_transaction_id,
+    )
+
+    if not is_valid_transaction_id(transaction_id):
+        raise TransactionStorageError("invalid transaction id")
+    store: TransactionFileStore | None = getattr(request.app.state, "transaction_store", None)
+    if store is None:
+        raise TransactionStorageError("transaction storage is not configured")
+    if not store.transaction_exists(transaction_id):
+        raise ArtifactNotFoundError("transaction not found")
+
+    normalized = {
+        "provider": result.provider,
+        "model": result.model,
+        "strategy": result.frame_strategy,
+        "classification": result.classification,
+        "attack_medium": result.attack_medium,
+        "self_reported_confidence": result.self_reported_confidence,
+        "evidence_codes": list(result.evidence_codes),
+        "latency_ms": result.latency_ms,
+        "experiment_id": result.experiment_id,
+        "request_id": request.scope.get("request_id", ""),
+        "prompt_version": result.prompt_version,
+        "schema_version": result.schema_version,
+        "timestamp": datetime.now(UTC).isoformat(),
+        "error": result.error.value if result.error else None,
+    }
+    store.write_artifact(
+        transaction_id,
+        ArtifactType.VLM_RESULT,
+        json.dumps(normalized, sort_keys=True).encode("utf-8"),
+        content_type="application/json",
+    )
+    store.update_transaction_status(transaction_id, "VLM_EVALUATED")

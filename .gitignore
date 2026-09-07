@@ -62,6 +62,9 @@ models/
 frontend/model-assets/face_detector.task
 frontend/public/mediapipe-wasm/
 
+# ---- Portrait matting model (provisioned, pinned; not committed) ----
+backend/model-assets/
+
 # ---- M4 evaluation data / artifacts (never commit datasets or dumps) --------
 local-data/
 artifacts/

@@ -42,3 +42,17 @@ export const vlmProvidersSchema = z.object({
   providers: z.array(vlmProviderDescriptorSchema),
   default_provider: z.string().nullable().optional(),
 })
+
+/** Transaction creation response (M5.7 §10, §15). */
+export const transactionCreateSchema = z.object({
+  transaction_id: z.string(),
+  status: z.string(),
+  capture_artifact: z
+    .object({
+      relative_path: z.string(),
+      content_type: z.string(),
+      size_bytes: z.number(),
+      sha256: z.string(),
+    })
+    .optional(),
+})

@@ -126,20 +126,25 @@ export function deriveReasonCodes(
 
   if (face.count === 0) {
     reasons.push('NO_FACE')
-  } else if (face.count > 1) {
-    reasons.push('MULTIPLE_FACES')
   } else {
-    const { minFaceCoverage, maxFaceCoverage, maxCenterOffsetX, maxCenterOffsetY } = config.face
-    if (face.coverageRatio !== undefined && face.coverageRatio < minFaceCoverage) {
-      reasons.push('FACE_TOO_SMALL')
-    }
-    if (face.coverageRatio !== undefined && face.coverageRatio > maxFaceCoverage) {
-      reasons.push('FACE_TOO_LARGE')
-    }
-    if (face.centerOffset !== undefined) {
-      const maxDistance = Math.sqrt(maxCenterOffsetX ** 2 + maxCenterOffsetY ** 2)
-      if (face.centerOffset.distance > maxDistance) {
-        reasons.push('FACE_OFF_CENTER')
+    // MULTIPLE_FACES reflects *participating* foreground faces, not incidental background faces
+    // (M5.7 §28-30): a small peripheral/profile face never forces a rejection.
+    const participating = face.participatingCount ?? face.count
+    if (participating >= 2) {
+      reasons.push('MULTIPLE_FACES')
+    } else {
+      const { minFaceCoverage, maxFaceCoverage, maxCenterOffsetX, maxCenterOffsetY } = config.face
+      if (face.coverageRatio !== undefined && face.coverageRatio < minFaceCoverage) {
+        reasons.push('FACE_TOO_SMALL')
+      }
+      if (face.coverageRatio !== undefined && face.coverageRatio > maxFaceCoverage) {
+        reasons.push('FACE_TOO_LARGE')
+      }
+      if (face.centerOffset !== undefined) {
+        const maxDistance = Math.sqrt(maxCenterOffsetX ** 2 + maxCenterOffsetY ** 2)
+        if (face.centerOffset.distance > maxDistance) {
+          reasons.push('FACE_OFF_CENTER')
+        }
       }
     }
   }

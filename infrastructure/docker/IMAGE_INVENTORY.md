@@ -8,7 +8,7 @@ real UAT deploy. No secrets/hostnames are committed here.
 
 | Service | Local image | Base image | Platform | App version | Git SHA | Runtime port | Health endpoint | Notes |
 |---|---|---|---|---|---|---|---|---|
-| backend | `livephoto-backend:<sha>` | `python:3.13-slim` (runtime) | linux/amd64 (target) | 0.1.0 | `<git rev-parse --short HEAD>` | 8000 | `/health/live`, `/health/ready` | non-root `appuser`; uv-frozen deps; no dev deps |
+| backend | `livephoto-backend:<sha>` | `python:3.13-slim` (runtime) | linux/amd64 (target) | 0.1.0 | `<git rev-parse --short HEAD>` | 8000 | `/health/live`, `/health/ready` | non-root `appuser`; uv-frozen deps; no dev deps; `FILE_STORAGE_ROOT` + portrait model mounted at runtime |
 | frontend | `livephoto-frontend:<sha>` | build `node:24-alpine` → runtime `nginx:1.27-alpine` | linux/amd64 (target) | 0.1.0 | `<git rev-parse --short HEAD>` | 8080 | static | non-root `appuser`; SPA fallback; runtime-config.js generated from env |
 
 ## MSSQL reference (mirrored from official Microsoft image)

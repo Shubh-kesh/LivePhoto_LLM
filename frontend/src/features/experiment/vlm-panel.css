@@ -89,3 +89,27 @@
 .vlm-experiment__result dd {
   margin: 0;
 }
+
+/* M5.7 processed-portrait preview (below the LIVE VLM result). */
+.vlm-experiment__portrait-status {
+  margin: var(--lp-space-4) 0 0;
+  color: var(--lp-color-text-secondary);
+}
+
+.vlm-experiment__portrait {
+  margin-top: var(--lp-space-4);
+}
+
+.vlm-experiment__portrait-title {
+  margin: 0 0 var(--lp-space-2);
+  font-size: var(--lp-font-size-md);
+  font-weight: var(--lp-font-weight-semibold);
+}
+
+.vlm-experiment__portrait-image {
+  display: block;
+  width: min(100%, 360px);
+  border-radius: var(--lp-radius-md);
+  border: 1px solid var(--lp-color-border);
+  box-shadow: var(--lp-shadow-sm);
+}

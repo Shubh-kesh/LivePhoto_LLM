@@ -76,3 +76,39 @@ See `docs/LOCAL_GEMMA_INTEGRATION.md` for the API contract and inference-service
 - `MSSQL_SA_PASSWORD`, `ACCEPT_EULA`, `DATABASE_URL` are runtime deployment config — never baked
   into the image (M5.6 §61).
 - The app still starts without a database; SQL Server Linux requires x86-64 nodes (M5.6 §62-64).
+
+## Transaction file storage (M5.7)
+
+Filesystem-only (no GCS/S3). Backend writes transaction artifacts under a mounted path:
+
+| Variable | Example | Meaning |
+|---|---|---|
+| `FILE_STORAGE_ROOT` | `/mnt/livephoto` | Root of transaction storage (mounted volume in UAT/prod) |
+
+Local development:
+```env
+FILE_STORAGE_ROOT=./local-data/file-storage
+```
+Container example (same image, runtime mount):
+```bash
+docker run -v "$(pwd)/backend/local-data/file-storage:/data/livephoto" \
+  -e FILE_STORAGE_ROOT=/data/livephoto \
+  -p 8000:8000 livephoto-backend:<sha>
+```
+See `docs/TRANSACTION_FILE_STORAGE.md`.
+
+## Portrait processing (M5.7)
+
+| Variable | Example | Meaning |
+|---|---|---|
+| `PORTRAIT_PROCESSING_ENABLED` | `true` | Master switch |
+| `PORTRAIT_BACKGROUND_MODE` | `solid` | Background mode (solid only) |
+| `PORTRAIT_BACKGROUND_COLOR` | `#FFFFFF` | Solid background color |
+| `PORTRAIT_CROP_MODE` | `passport` | Crop mode |
+| `PORTRAIT_OUTPUT_FORMAT` | `jpeg` | Output format |
+| `PORTRAIT_JPEG_QUALITY` | `95` | JPEG quality |
+| `PORTRAIT_MODEL_PATH` | `/app/model-assets/modnet_photographic_portrait_matting.onnx` | Provisioned model asset (mounted) |
+| `PORTRAIT_MODEL_SHA256` | `07c308cf…` | Pinned model hash |
+
+The model asset is provisioned (not downloaded per-request) and mounted into the container; it is
+never baked into the image. See `docs/PORTRAIT_PROCESSING.md`.

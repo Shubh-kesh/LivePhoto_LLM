@@ -88,6 +88,60 @@ class Settings(BaseSettings):
     local_vlm_max_images: int = 3
     local_vlm_verify_tls: bool = True
 
+    # ---- Transaction file storage (M5.7 §7, §79-81). Filesystem-based; no object storage. ----
+    file_storage_root: str = "./local-data/file-storage"
+    file_storage_transactions_dir: str = "transactions"
+
+    # ---- Portrait processing (M5.7 §37-40, §110). ----
+    portrait_processing_enabled: bool = False
+    portrait_background_mode: str = "solid"
+    portrait_background_color: str = "#FFFFFF"
+    portrait_crop_mode: str = "passport"
+    portrait_output_format: str = "jpeg"
+    portrait_jpeg_quality: int = 95
+    portrait_model_path: str = ""
+    #: Pinned SHA-256 of the provisioned portrait model asset (verified at load, M5.7 §52).
+    portrait_model_sha256: str = ""
+    #: Test-only segmentation provider ("fake") for deterministic CI/E2E (never in production).
+    portrait_segmentation_provider: str = ""
+
+    @field_validator("portrait_background_mode")
+    @classmethod
+    def _validate_portrait_background_mode(cls, value: str) -> str:
+        if value not in ("solid",):
+            raise ValueError(f"unsupported PORTRAIT_BACKGROUND_MODE '{value}' (only 'solid')")
+        return value
+
+    @field_validator("portrait_background_color")
+    @classmethod
+    def _validate_portrait_background_color(cls, value: str) -> str:
+        import re
+
+        if not re.fullmatch(r"#[0-9A-Fa-f]{6}", value):
+            raise ValueError("PORTRAIT_BACKGROUND_COLOR must be #RRGGBB")
+        return value.upper()
+
+    @field_validator("portrait_crop_mode")
+    @classmethod
+    def _validate_portrait_crop_mode(cls, value: str) -> str:
+        if value != "passport":
+            raise ValueError("unsupported PORTRAIT_CROP_MODE (only 'passport')")
+        return value
+
+    @field_validator("portrait_output_format")
+    @classmethod
+    def _validate_portrait_output_format(cls, value: str) -> str:
+        if value != "jpeg":
+            raise ValueError("unsupported PORTRAIT_OUTPUT_FORMAT (only 'jpeg')")
+        return value
+
+    @field_validator("portrait_jpeg_quality")
+    @classmethod
+    def _validate_portrait_jpeg_quality(cls, value: int) -> int:
+        if not 1 <= value <= 100:
+            raise ValueError("PORTRAIT_JPEG_QUALITY must be between 1 and 100")
+        return value
+
     @property
     def vlm_experiment_available(self) -> bool:
         """Experiment availability by environment (M5.6 §11-14).

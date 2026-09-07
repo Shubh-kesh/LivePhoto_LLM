@@ -47,6 +47,9 @@ export default defineConfig({
         VLM_EXPERIMENT_ENABLED: 'true',
         VLM_PROVIDER: 'mock',
         VLM_TIMEOUT_SECONDS: '2',
+        // Deterministic portrait matting for E2E (no real model required in CI) + portrait on.
+        PORTRAIT_PROCESSING_ENABLED: 'true',
+        PORTRAIT_SEGMENTATION_PROVIDER: 'fake',
       },
     },
     {

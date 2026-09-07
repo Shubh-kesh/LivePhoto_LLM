@@ -27,8 +27,9 @@ def make_settings(**overrides: object) -> Settings:
 
 
 @pytest.fixture
-def settings() -> Settings:
-    return make_settings()
+def settings(tmp_path) -> Settings:
+    # Tests never write into the real local-data tree: storage root is a temp directory.
+    return make_settings(file_storage_root=str(tmp_path / "file-storage"))
 
 
 @pytest.fixture

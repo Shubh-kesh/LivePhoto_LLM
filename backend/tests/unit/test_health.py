@@ -22,7 +22,10 @@ def test_health_ready_ok_without_database(client) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ready"
-    assert body["checks"] == []
+    names = [check["name"] for check in body["checks"]]
+    assert "file_storage" in names
+    storage = next(check for check in body["checks"] if check["name"] == "file_storage")
+    assert storage["status"] == "ok"
 
 
 class _BoomEngine:
@@ -57,8 +60,9 @@ def test_health_ready_returns_503_when_dependency_unavailable(settings) -> None:
     assert response.status_code == 503
     body = response.json()
     assert body["status"] == "not_ready"
-    assert body["checks"][0]["name"] == "database"
-    assert body["checks"][0]["status"] == "unavailable"
+    database_check = next((check for check in body["checks"] if check["name"] == "database"), None)
+    assert database_check is not None
+    assert database_check["status"] == "unavailable"
 
 
 def test_health_live_succeeds_even_when_dependency_down(settings) -> None:
