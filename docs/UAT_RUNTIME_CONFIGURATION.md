@@ -118,7 +118,7 @@ never baked into the image. See `docs/PORTRAIT_PROCESSING.md`.
 | Variable | Local dev | UAT/production (user/ops must provide) |
 |---|---|---|
 | `PUBLIC_LIVEPHOTO_BASE_URL` | `http://localhost:5173` | browser-facing origin |
-| `CONSUMER_PROFILES_PATH` | `backend/config/consumers.local.json` | mounted profile path |
+| `CONSUMER_PROFILES_PATH` |  `./config/consumers.local.json` | mounted profile path |
 | `S2S_AUTH_MODE` | `local_dev` | `jwt` |
 | `S2S_LOCAL_DEV_TOKEN` | `<local secret>` | n/a (forbidden) |
 | `S2S_JWT_ISSUER` / `S2S_JWT_AUDIENCE` | — | issuer / `livephoto` |

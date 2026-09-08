@@ -43,5 +43,6 @@ cp config/consumers.example.json config/consumers.local.json   # from backend/
 # and allowed_redirect_origins (e.g. http://localhost:3001)
 ```
 
-Point `CONSUMER_PROFILES_PATH` at `backend/config/consumers.local.json` for local runs. UAT/prod
+Point `CONSUMER_PROFILES_PATH` at `./config/consumers.local.json` (relative to the backend cwd
+`backend/`) for local runs. UAT/prod
 mount the real profile file (never baked into images).

@@ -42,6 +42,7 @@ export function IntegrationPage() {
   const [phase, setPhase] = useState<Phase | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [capturing, setCapturing] = useState(false)
+  const [cameraReady, setCameraReady] = useState(false)
   const [frameUrl, setFrameUrl] = useState<string | null>(null)
   const [portraitUrl, setPortraitUrl] = useState<string | null>(null)
   const [portraitState, setPortraitState] = useState<'idle' | 'processing' | 'ready' | 'error'>(
@@ -92,8 +93,10 @@ export function IntegrationPage() {
       if (videoRef.current) {
         videoRef.current.srcObject = stream
       }
+      setCameraReady(true)
     } catch {
       setError(captureCopy.errors.cameraStartFailed.title)
+      setCameraReady(false)
     }
   }, [])
 
@@ -214,7 +217,7 @@ export function IntegrationPage() {
               variant="primary"
               size="lg"
               onClick={() => void captureFrame()}
-              disabled={capturing}
+              disabled={capturing || !cameraReady}
             >
               {capturing ? 'Capturing…' : 'Capture photo'}
             </Button>

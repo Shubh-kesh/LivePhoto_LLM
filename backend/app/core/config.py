@@ -112,7 +112,9 @@ class Settings(BaseSettings):
     #: Browser-facing origin used to build public launch URLs (never the backend's own origin).
     public_livephoto_base_url: str = ""
     #: Path to the consumer-profile configuration (committed example; real profiles mounted).
-    consumer_profiles_path: str = "backend/config/consumers.example.json"
+    #: Relative to the backend process cwd (the backend normally runs from ``backend/``), so the
+    #: committed example resolves to ``backend/config/consumers.example.json``.
+    consumer_profiles_path: str = "config/consumers.example.json"
 
     # Launch capability tokens (M5.8 §7). Opaque, >=256-bit, hash-only persistence.
     launch_token_ttl_seconds: int = 600

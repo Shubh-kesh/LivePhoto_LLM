@@ -28,7 +28,10 @@ test('successful integration: launch -> clean URL -> capture -> portrait -> subm
   await expect(page.getByRole('button', { name: 'Open camera' })).toBeVisible()
 
   await page.getByRole('button', { name: 'Open camera' }).click()
-  await expect(page.getByRole('button', { name: 'Capture photo' })).toBeVisible({ timeout: 15_000 })
+  // Capture stays disabled until the camera stream is attached.
+  await expect(page.getByRole('button', { name: 'Capture photo' })).toBeEnabled({
+    timeout: 15_000,
+  })
   await page.getByRole('button', { name: 'Capture photo' }).click()
   await expect(page.getByRole('button', { name: 'Prepare portrait' })).toBeVisible({
     timeout: 20_000,

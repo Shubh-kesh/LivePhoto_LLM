@@ -948,17 +948,22 @@ def test_validate_redirect_url_exact_origin() -> None:
     )
     assert validate_redirect_url(profile, "https://consumer.example.test/complete", local=False)
     assert validate_redirect_url(profile, "http://localhost:3001/complete", local=True)
+    # approved origin + query is allowed (a query string is not an open-redirect vector)
+    assert validate_redirect_url(
+        profile, "https://consumer.example.test/path?code=abc123", local=False
+    )
     # subdomain / substring / endsWith must NOT match
     assert not validate_redirect_url(
         profile, "https://consumer.example.test.evil.com/", local=False
     )
     assert not validate_redirect_url(profile, "https://evil-consumer.example.test/", local=False)
     assert not validate_redirect_url(profile, "https://consumer.example.test:8443/", local=False)
-    # http disallowed outside local; userinfo/query/fragment rejected
+    # http disallowed outside local; userinfo/fragment/schemes rejected
     assert not validate_redirect_url(profile, "http://consumer.example.test/", local=False)
     assert not validate_redirect_url(profile, "https://user@consumer.example.test/", local=False)
-    assert not validate_redirect_url(profile, "https://consumer.example.test/?x=1", local=False)
     assert not validate_redirect_url(profile, "https://consumer.example.test/#f", local=False)
+    assert not validate_redirect_url(profile, "javascript:alert(1)", local=False)
+    assert not validate_redirect_url(profile, "data:text/html,hi", local=False)
     assert not validate_redirect_url(profile, "", local=False)
 
 
@@ -1294,3 +1299,39 @@ def test_concurrent_submit_single_callback(tmp_path) -> None:
             assert status.json()["status"] == "COMPLETED"
     finally:
         srv.shutdown()
+
+
+def test_consumer_profiles_path_default_resolves_from_backend_cwd(tmp_path) -> None:
+    """The committed example path resolves and loads when running from the backend/ cwd.
+
+    Settings default is ``config/consumers.example.json`` (relative to the backend process cwd),
+    matching the documented local startup directory (``backend/``).
+    """
+    from pathlib import Path
+
+    from app.core.config import Settings
+    from app.integrations.consumers import load_consumer_profiles
+
+    settings = Settings(_env_file=None, app_env="test", file_storage_root=str(tmp_path / "s"))
+    path = Path(settings.consumer_profiles_path)
+    assert path.is_absolute() is False
+    assert path.exists(), f"default consumer path does not resolve from cwd: {path}"
+    profiles = load_consumer_profiles(str(path), settings.app_env)
+    assert len(profiles) >= 1
+    assert profiles[0].consumer_id == "D365"
+
+
+def test_validate_redirect_url_malformed_port_rejected() -> None:
+    from app.integrations.callback import validate_redirect_url
+    from app.integrations.consumers import ConsumerProfile
+
+    profile = ConsumerProfile(
+        consumer_id="D365", allowed_redirect_origins=["https://consumer.example.test"]
+    )
+    # Out-of-range / non-numeric ports must be validation failures, not exceptions.
+    assert (
+        validate_redirect_url(profile, "https://consumer.example.test:99999/", local=False) is False
+    )
+    assert (
+        validate_redirect_url(profile, "https://consumer.example.test:abc/", local=False) is False
+    )

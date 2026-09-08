@@ -48,6 +48,8 @@ Expected response:
 ```
 
 The redirect URL is validated server-side against the consumer profile's `allowed_redirect_origins`
-by **exact origin** (scheme+host+port, HTTPS outside local, no userinfo). After a successful
-callback + valid redirect, the workflow becomes `COMPLETED` and active launch/session state is
-revoked. The frontend receives only the backend-validated redirect URL and navigates to it.
+by **exact origin** (scheme+host+port, HTTPS outside local, no userinfo, no `javascript:`/`data:`
+schemes, no fragment). A query string (e.g. `?code=abc`) is allowed — it is not an open-redirect
+vector — provided the origin matches exactly. After a successful callback + valid redirect, the
+workflow becomes `COMPLETED` and active launch/session state is revoked. The frontend receives only
+the backend-validated redirect URL and navigates to it.

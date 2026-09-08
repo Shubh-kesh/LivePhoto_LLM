@@ -141,7 +141,13 @@ async def _backoff(attempt: int) -> None:
 
 
 def validate_redirect_url(profile: ConsumerProfile, redirect_url: str, *, local: bool) -> bool:
-    """Exact-origin redirect validation (M5.8 §23). HTTPS outside local; no substring matching."""
+    """Exact-origin redirect validation (M5.8 §23).
+
+    Security requirement: exact allowed origin, HTTPS outside local, no userinfo, no
+    javascript:/data: schemes. A query string is NOT an open-redirect vector and is allowed (e.g.
+    ``https://consumer.example/path?code=abc``). Fragments are rejected (client-side only, could
+    carry tokens in the URL hash). No substring matching / no endsWith domain logic.
+    """
     if not redirect_url:
         return False
     try:
@@ -150,13 +156,16 @@ def validate_redirect_url(profile: ConsumerProfile, redirect_url: str, *, local:
         parsed = urlparse(redirect_url)
     except ValueError:
         return False
-    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+    if parsed.username or parsed.password or parsed.fragment:
         return False
     if parsed.scheme != "https" and not (local and parsed.scheme == "http"):
         return False
     if parsed.hostname is None:
         return False
-    port = parsed.port
+    try:
+        port = parsed.port
+    except ValueError:
+        return False  # out-of-range / non-numeric port -> validation failure, not an exception
     origin = parsed.scheme + "://" + parsed.hostname + (f":{port}" if port else "")
     return profile.allows_redirect_origin(origin)
 
