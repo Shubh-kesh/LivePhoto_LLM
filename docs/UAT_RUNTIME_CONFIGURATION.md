@@ -112,3 +112,26 @@ See `docs/TRANSACTION_FILE_STORAGE.md`.
 
 The model asset is provisioned (not downloaded per-request) and mounted into the container; it is
 never baked into the image. See `docs/PORTRAIT_PROCESSING.md`.
+
+## M5.8 — Secure Consumer Integration runtime env
+
+| Variable | Local dev | UAT/production (user/ops must provide) |
+|---|---|---|
+| `PUBLIC_LIVEPHOTO_BASE_URL` | `http://localhost:5173` | browser-facing origin |
+| `CONSUMER_PROFILES_PATH` | `backend/config/consumers.local.json` | mounted profile path |
+| `S2S_AUTH_MODE` | `local_dev` | `jwt` |
+| `S2S_LOCAL_DEV_TOKEN` | `<local secret>` | n/a (forbidden) |
+| `S2S_JWT_ISSUER` / `S2S_JWT_AUDIENCE` | — | issuer / `livephoto` |
+| `S2S_JWT_JWKS_URL` | (local file in test) | https JWKS URL |
+| `S2S_JWT_CLIENT_ID_CLAIM` | `client_id` | per IdP |
+| `LAUNCH_TOKEN_TTL_SECONDS` | `600` | 600 |
+| `BROWSER_SESSION_TTL_SECONDS` | `1800` | 1800 |
+| `BROWSER_COOKIE_SECURE` | `false` | `true` |
+| `BROWSER_COOKIE_SAMESITE` | `strict` | `strict` |
+| `CALLBACK_TIMEOUT_SECONDS` / `CALLBACK_MAX_RETRIES` | `10` / `2` | ops-approved |
+| `CAPTURE_ATTEMPT_*` | `5`/`7`/`10` | ops-approved |
+| `DECISION_TEST_WRITER_ENABLED` | `false` | `false` (never in uat/prod) |
+
+UAT/production **must** use `S2S_AUTH_MODE=jwt` with a valid JWKS and `bearer_env` callback auth;
+invalid/missing consumer integration fails readiness. Same-origin nginx proxies `/api` and
+`/xbiz/live_photo/l/` to the backend.

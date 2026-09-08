@@ -273,6 +273,7 @@ class PortraitProcessor:
             "model_hash": model.get("sha256"),
             "source_artifact": source.relative_path,
             "output_artifact": output.relative_path,
+            "output_sha256": output.sha256,
             "crop_version": CROP_VERSION,
             "crop_coordinates": {
                 "x0": crop_box.x0,

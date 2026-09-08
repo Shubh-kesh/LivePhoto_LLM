@@ -1,11 +1,11 @@
-# LivePhoto — Roadmap (M0 Baseline, updated for M5.7)
+# LivePhoto — Roadmap (M0 Baseline, updated for M5.8)
 
-Status: **M0-M5 COMPLETE. M5.5 COMPLETE. M5.6 COMPLETE. M5.7 COMPLETE** (transaction-scoped
-filesystem storage, LIVE-triggered portrait matting + passport crop + configurable background,
-processed-photo preview in the VLM panel). M5 public POC baseline remains PARTIAL (quota-limited,
-resumable; device gates NOT COMPLETE). M6+ are planned and are **not implemented** in M5/M5.5/M5.6/
-M5.7. Each milestone: goal / scope / non-scope / dependencies / deliverables / acceptance criteria
-/ major risks.
+Status: **M0-M5 COMPLETE. M5.5 COMPLETE. M5.6 COMPLETE. M5.7 COMPLETE. M5.8 COMPLETE**
+(secure same-origin consumer launch + capture + canonical-PASS submit + callback integration,
+transaction-scoped filesystem storage, LIVE-triggered portrait matting). M5 public POC baseline
+remains PARTIAL (quota-limited, resumable; device gates NOT COMPLETE). M6+ are planned and are
+**not implemented** in M5.x. Each milestone: goal / scope / non-scope / dependencies / deliverables
+/ acceptance criteria / major risks.
 
 Dependencies and acceptance criteria reference the design docs in this repository. Milestones may
 be re-sequenced as evaluation results (M4–M9) dictate.
@@ -218,6 +218,38 @@ be re-sequenced as evaluation results (M4–M9) dictate.
   blink-tolerant burst selection, customer eyes-open guidance/copy).
 - **Major risks:** Real-model hair-quality validation limited to a synthetic fixture locally; GPU
   capacity unknown; retention deferred.
+
+## M5.8 — Secure Consumer Integration
+- **Status: COMPLETE** (engineering).
+- **Goal:** Replace the ad-hoc query-string integration with a secure, same-origin consumer launch +
+  capture + canonical-PASS submit + callback flow.
+- **Scope:** Same-origin topology (nginx/Vite proxy `/api` + `/xbiz/live_photo/l/`); S2S launch API
+  (`POST /integration/launch-sessions`, reissue, status) authenticated by JWT (PyJWKClient,
+  `S2S_JWT_CLIENT_ID_CLAIM` -> `jwt_client_ids`) or local_dev (local/test/dev only); backend-config
+  consumer profiles (`backend/config/consumers.example.json`, no DB); opaque >=256-bit launch token
+  (hash-only, TTL 600s, reopenable, reissue revokes old); redemption -> ACTIVE/TERMINAL browser
+  session + `lp_session`/`lp_csrf` cookies, clean-URL 302; server-authoritative capture-attempt
+  model (`attempt_id` at-most-once, warning 5/7, terminal 10); canonical `DecisionOutcome.PASS`
+  boundary (test-only writer in local/test/dev only, never uat/prod; VLM LIVE never authorizes);
+  browser portrait (canonical-PASS gated); Submit + success-only callback (Base64 in memory, stable
+  Idempotency-Key, bearer_env/none, transient-only retry, exact-origin redirect); consumer status
+  API; low-cardinality metrics; redaction (base64/csrf/callback_secret) + token-path log protection;
+  env-aware readiness; docs.
+- **Non-scope:** M6 spoof models; object storage; DB for transactions/consumers; HMAC/mTLS in app
+  code (documented as future hardening); real D365 verification.
+- **Dependencies:** M5.7 (portrait + transaction file storage), M5.6 (VLM panel), M3 (quality).
+- **Deliverables:** `app/integrations/`, `app/api/xbiz.py`, `app/api/v1/{integration,browser,dev}.py`,
+  `app/transactions/decisions.py`, `backend/config/consumers.example.json`, frontend integration
+  feature + `/xbiz/live_photo` route, vite/nginx same-origin proxying, docs
+  (`INTEGRATION_ARCHITECTURE`, `CONSUMER_PROFILES`, `CALLBACK_CONTRACT`, POSTMAN guide), env updates.
+- **Acceptance criteria:** M5.8 §-specific: launch creates transaction before capture; S2S JWT +
+  local-dev-only guard; consumer isolation; no external ID as path; launch-token entropy/hash/TTL/
+  reopen/reissue; clean-URL redemption; cookie/CSRF security; attempt at-most-once + 5/7/10; no
+  force-pass; VLM LIVE isolated; Base64 in-memory only; callback idempotency/retry/redirect
+  validation; COMPLETED terminality; no images/Base64/secrets in status; token-path log protection;
+  backend/frontend regressions green; no M6.
+- **Major risks:** Same-origin deployment topology requires ops confirmation; callback bearer secret
+  provisioning is a deployment concern; real D365/UAT callback auth to be confirmed.
 
 ## M6 — Screen/Device/Print Detection
 - **Goal:** Detect Phase-1 static presentation attacks.

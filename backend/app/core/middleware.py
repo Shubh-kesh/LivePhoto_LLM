@@ -23,6 +23,28 @@ _REQUEST_ID_HEADER = "x-request-id"
 _CSP = "default-src 'none'; frame-ancestors 'none'"
 _DOCS_PATHS = ("/docs", "/redoc", "/openapi.json")
 
+#: Launch redemption prefix that carries an opaque token in the URL. When the matched route
+#: template is unavailable we must still never log the raw token segment (M5.8 §24).
+_LAUNCH_REDEMPTION_PREFIX = "/xbiz/live_photo/l/"
+_LAUNCH_REDEMPTION_TEMPLATE = "/xbiz/live_photo/l/{token}"
+
+
+def _safe_request_path(scope: Scope) -> str:
+    """Return a log-safe request path.
+
+    Prefer the matched route template (like MetricsMiddleware); otherwise fall back to the raw path
+    with the launch-redemption token replaced by ``{token}``. Query strings are never included
+    (ASGI ``scope["path"]`` excludes the query string).
+    """
+    route = scope.get("route")
+    template = getattr(route, "path", None)
+    if isinstance(template, str) and template:
+        return template
+    path = scope.get("path", "") or ""
+    if path.startswith(_LAUNCH_REDEMPTION_PREFIX):
+        return _LAUNCH_REDEMPTION_TEMPLATE
+    return path
+
 
 class RequestIDMiddleware:
     """Generate/accept a request ID, expose it on the response and bind it to logging context."""
@@ -45,7 +67,7 @@ class RequestIDMiddleware:
         bind_request_context(
             request_id=request_id,
             method=scope.get("method", ""),
-            path=scope.get("path", ""),
+            path=_safe_request_path(scope),
         )
 
         async def send_wrapper(message: Message) -> None:
@@ -93,7 +115,7 @@ class RequestLoggingMiddleware:
                 status_code=status if status is not None else 500,
                 duration_ms=duration_ms,
                 method=scope.get("method", ""),
-                path=scope.get("path", ""),
+                path=_safe_request_path(scope),
             )
 
 

@@ -54,6 +54,76 @@ vlm_provider_errors_total = Counter(
     labelnames=("provider", "error_type"),
 )
 
+# M5.8 — Secure Consumer Integration. Low-cardinality only: consumer is bounded by configured
+# profiles; never transaction/session/token/attempt IDs or reason text as labels.
+launch_sessions_total = Counter(
+    "livephoto_launch_sessions_total",
+    "Consumer launch sessions requested",
+    labelnames=("consumer", "result"),
+)
+
+redemptions_total = Counter(
+    "livephoto_launch_redemptions_total",
+    "Launch token redemptions",
+    labelnames=("result",),
+)
+
+browser_capture_attempts_total = Counter(
+    "livephoto_browser_capture_attempts_total",
+    "Registered browser capture attempts",
+    labelnames=("consumer",),
+)
+
+submit_total = Counter(
+    "livephoto_submit_total",
+    "Browser submit attempts",
+    labelnames=("result",),
+)
+
+callback_events_total = Counter(
+    "livephoto_callback_events_total",
+    "Consumer callback delivery events",
+    labelnames=("consumer", "result"),
+)
+
+callback_duration_seconds = Histogram(
+    "livephoto_callback_duration_seconds",
+    "Consumer callback duration in seconds",
+    labelnames=("consumer",),
+    buckets=(0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0),
+)
+
+status_reads_total = Counter(
+    "livephoto_status_reads_total",
+    "Consumer status API reads",
+    labelnames=("consumer",),
+)
+
+
+def record_launch_session(consumer: str, result: str) -> None:
+    launch_sessions_total.labels(consumer, result).inc()
+
+
+def record_redemption(result: str) -> None:
+    redemptions_total.labels(result).inc()
+
+
+def record_capture_attempt(consumer: str) -> None:
+    browser_capture_attempts_total.labels(consumer).inc()
+
+
+def record_submit(result: str) -> None:
+    submit_total.labels(result).inc()
+
+
+def record_callback(consumer: str, result: str, duration_seconds: float) -> None:
+    callback_events_total.labels(consumer, result).inc()
+    callback_duration_seconds.labels(consumer).observe(duration_seconds)
+
+
+def record_status_read(consumer: str) -> None:
+    status_reads_total.labels(consumer).inc()
+
 
 def record_vlm_evaluation(
     provider: str,

@@ -1,15 +1,42 @@
-"""Bank integration boundary (M0 API_CONTRACT, M1 §23, §71).
-
-Future server-to-server integration and decision callbacks live here. Nothing is implemented in M1.
+"""Bank / consumer integration boundary (M5.8 Secure Consumer Integration).
 
 Trust separation (kept by design):
-- **Bank Integration API**: callers are the authenticated bank backend (mTLS / OAuth2 client
-  credentials / signed requests — mechanism pending, open question #4).
-- **Capture API**: callers are the customer browser holding only a short-lived opaque session
-  credential. The browser must never receive bank server credentials.
+- **S2S Integration API** (launch / reissue / status): callers are the authenticated
+  consuming-application backend (JWT via ``S2S_AUTH_MODE=jwt``, or ``local_dev`` only in
+  local/test/development).
+- **Browser API**: callers are the customer browser holding an opaque HttpOnly session cookie + a
+  session-bound CSRF cookie. The browser never receives bank server credentials.
+- **Callback**: LivePhoto pushes to the consumer callback URL resolved from the trusted consumer
+  profile (bearer_env / none), with a stable idempotency ``event_id``.
 
-Callback contract (M1 refinement of docs/API_CONTRACT.md): every outbound callback carries a stable
-``event_id``, an ``event_type`` (e.g. ``LIVEPHOTO.DECISION.CREATED``), ``transaction_id`` and
-``decision_id``, with idempotency, retry state, delivery attempts, acknowledgement and audit
-history.
+M5.8 implements the launch, redemption, browser-session, capture-attempt, canonical-PASS, submit and
+callback flows. No M6 spoof work is included.
 """
+
+from app.integrations.consumers import (
+    CallbackConfig,
+    ConsumerConfigError,
+    ConsumerProfile,
+    ConsumerRegistry,
+    RequestPolicy,
+    load_consumer_profiles,
+)
+from app.integrations.store import (
+    IntegrationIndexError,
+    IntegrationIndexPathError,
+    IntegrationIndexStore,
+    external_key_hash,
+)
+
+__all__ = [
+    "CallbackConfig",
+    "ConsumerConfigError",
+    "ConsumerProfile",
+    "ConsumerRegistry",
+    "IntegrationIndexError",
+    "IntegrationIndexPathError",
+    "IntegrationIndexStore",
+    "RequestPolicy",
+    "external_key_hash",
+    "load_consumer_profiles",
+]

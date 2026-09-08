@@ -29,7 +29,7 @@ describe('readRuntimeConfig', () => {
   it('falls back to safe defaults when no runtime config or Vite value is present', () => {
     setWindowConfig(undefined)
     const config = readRuntimeConfig({})
-    expect(config.apiBaseUrl).toBeTruthy()
+    expect(config.apiBaseUrl).toBe('') // same-origin relative base is the M5.8 default
     expect(config.appEnv).toBeTruthy()
     expect(config.vlmExperimentUiEnabled).toBe(false)
   })
@@ -57,7 +57,7 @@ describe('readRuntimeConfig', () => {
     setWindowConfig({ appEnv: '', apiBaseUrl: '', vlmExperimentUiEnabled: false })
     const config = readRuntimeConfig({})
     expect(config.appEnv).toBeTruthy()
-    expect(config.apiBaseUrl).toBeTruthy()
+    expect(config.apiBaseUrl).toBe('') // same-origin relative base
   })
 })
 

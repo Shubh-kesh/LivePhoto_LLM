@@ -17,6 +17,8 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.api.deps import BrowserAuthError
+from app.integrations.s2s_auth import S2SAuthError
 from app.portrait.errors import PortraitProcessingError
 from app.providers.vision.errors import VlmError, VlmErrorCode
 from app.transactions import (
@@ -156,6 +158,24 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=500,
             content=_envelope(request, exc.code.value, "We couldn't prepare your photo.", 500),
+        )
+
+    @app.exception_handler(S2SAuthError)
+    async def _handle_s2s_auth(request: Request, exc: S2SAuthError) -> Any:
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=_envelope(request, exc.code, exc.message, exc.status_code),
+        )
+
+    @app.exception_handler(BrowserAuthError)
+    async def _handle_browser_auth(request: Request, exc: BrowserAuthError) -> Any:
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=_envelope(request, exc.code, exc.message, exc.status_code),
         )
 
     @app.exception_handler(StarletteHTTPException)

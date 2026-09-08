@@ -2,6 +2,7 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { Route, Routes } from 'react-router-dom'
 
 import { CapturePage } from '../features/capture/CapturePage'
+import { IntegrationPage } from '../features/integration/IntegrationPage'
 import { HomePage } from '../pages/HomePage'
 import { NotFoundPage } from '../pages/NotFoundPage'
 import { ErrorBoundary } from './ErrorBoundary'
@@ -14,6 +15,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/capture" element={<CapturePage />} />
+          <Route path="/xbiz/live_photo" element={<IntegrationPage />} />
           <Route path="/dev/vlm-experiment" element={<CapturePage experiment />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>

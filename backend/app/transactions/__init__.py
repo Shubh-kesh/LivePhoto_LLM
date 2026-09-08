@@ -6,12 +6,14 @@ from app.transactions.artifacts import (
     ArtifactType,
 )
 from app.transactions.store import (
+    TERMINAL_TRANSACTION_STATUSES,
     ArtifactNotFoundError,
     StorageHealth,
     TransactionExistsError,
     TransactionFileStore,
     TransactionNotFoundError,
     TransactionPathError,
+    TransactionStatus,
     TransactionStorageError,
     is_valid_transaction_id,
     sha256_hex,
@@ -19,6 +21,7 @@ from app.transactions.store import (
 
 __all__ = [
     "ARTIFACT_RELATIVE_PATHS",
+    "TERMINAL_TRANSACTION_STATUSES",
     "ArtifactNotFoundError",
     "ArtifactReference",
     "ArtifactType",
@@ -27,6 +30,7 @@ __all__ = [
     "TransactionFileStore",
     "TransactionNotFoundError",
     "TransactionPathError",
+    "TransactionStatus",
     "TransactionStorageError",
     "is_valid_transaction_id",
     "sha256_hex",

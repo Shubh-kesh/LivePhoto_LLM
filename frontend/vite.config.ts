@@ -6,6 +6,11 @@ export default defineConfig({
   server: {
     allowedHosts: true,
     port: 5173,
+    // Same-origin M5.8 topology: proxy backend API + launch redemption to FastAPI.
+    proxy: {
+      '/api': { target: 'http://localhost:8000', changeOrigin: false },
+      '/xbiz/live_photo/l': { target: 'http://localhost:8000', changeOrigin: false },
+    },
   },
   test: {
     environment: 'jsdom',

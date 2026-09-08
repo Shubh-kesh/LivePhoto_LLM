@@ -54,6 +54,19 @@ def _store(request: Request) -> TransactionFileStore:
     return store
 
 
+def _guard_experiment(request: Request) -> None:
+    """Gate the legacy experiment transaction/portrait endpoints (M5.8 §1).
+
+    These existed for the M5.7 VLM experiment (transaction created at capture upload). Under M5.8
+    the production path creates the transaction at launch; this endpoint must not be a production
+    bypass, so it is restricted to experiment availability.
+    """
+    from app.providers.vision import VlmError, VlmErrorCode
+
+    if not _settings(request).vlm_experiment_available:
+        raise VlmError(VlmErrorCode.VLM_DISABLED, "VLM experiment is not enabled")
+
+
 def _tx_id_or_error(transaction_id: str) -> str:
     if not is_valid_transaction_id(transaction_id):
         raise TransactionPathError("invalid transaction id")
@@ -70,6 +83,7 @@ async def create_transaction(
     """Create a transaction folder FIRST, then persist the selected original capture (M5.7 §2)."""
     settings = _settings(request)
     store = _store(request)
+    _guard_experiment(request)
     from app.api.v1.experiments import _read_bounded, _validate_image
 
     data = await _read_bounded(image, settings.vlm_max_single_image_bytes)
@@ -123,6 +137,7 @@ async def create_transaction(
 @router.get("/{transaction_id}/artifacts/{artifact_type}")
 def get_artifact(request: Request, transaction_id: str, artifact_type: str) -> Response:
     """Controlled artifact read for known artifact types only (M5.7 §62-64)."""
+    _guard_experiment(request)
     _tx_id_or_error(transaction_id)
     store = _store(request)
     try:
@@ -151,6 +166,7 @@ async def process_portrait(
     face_box: str = Form(""),  # "x,y,w,h" normalized, optional
 ) -> dict[str, Any]:
     """Trigger backend portrait processing only when the stored VLM result is LIVE (M5.7 §21)."""
+    _guard_experiment(request)
     _tx_id_or_error(transaction_id)
     store = _store(request)
     if not store.transaction_exists(transaction_id):

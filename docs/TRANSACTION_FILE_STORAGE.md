@@ -106,3 +106,25 @@ corrupt JSON. File permissions are conservative (application-only; never `0777`)
 ## Retention
 
 Retention/purge is a **later policy concern**; not implemented in M5.7.
+
+## M5.8 integration state
+
+Consumer integration adds shared-filesystem index areas under the same `FILE_STORAGE_ROOT`
+(preserving root confinement, atomic writes, symlink protection and conservative permissions):
+
+```text
+<FILE_STORAGE_ROOT>/
+  transactions/<internal_tx_id>/...   # + launch/active-launches.json, browser/active-session.json,
+                                      #   attempts.json, decisions/decision.json,
+                                      #   callback/decision-callback.json, .lock
+  index/launch-tokens/<sha256>.json       # opaque launch tokens (hash only)
+  index/browser-sessions/<sha256>.json    # browser session + CSRF (hashes only)
+  index/external/<sha256(consumer:external)>.json   # external -> internal lookup
+```
+
+- External transaction IDs are correlation values only; **never** used as filesystem paths (SHA-256
+  index filenames instead).
+- State transitions (attempt counting, launch revocation, session rotation, status, callback
+  dedup) are serialized with a per-transaction `fcntl.flock` on `<tx>/ .lock`.
+- Terminal states (`COMPLETED`, `ATTEMPT_LIMIT_EXCEEDED`) cannot restart capture.
+- Launch tokens are **reopenable** (until expiry/reissue/terminal state), not one-time capture tokens.

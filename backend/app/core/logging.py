@@ -20,7 +20,22 @@ from app.core.config import Settings
 
 #: Keys that must never appear verbatim in logs. Comparison is case-insensitive and
 #: substring-triggered for token/secret/password families.
-_SENSITIVE_KEY_PARTS = ("token", "secret", "password", "passwd", "api_key", "apikey")
+_SENSITIVE_KEY_PARTS = (
+    "token",
+    "secret",
+    "password",
+    "passwd",
+    "api_key",
+    "apikey",
+    "base64",
+    "csrf",
+    "callback_secret",
+    "signature",
+    "launch_token",
+    "lp_session",
+    "lp_csrf",
+    "x-livephoto-dev-auth",
+)
 _SENSITIVE_HEADERS = frozenset(
     {
         "authorization",
@@ -28,6 +43,8 @@ _SENSITIVE_HEADERS = frozenset(
         "set-cookie",
         "proxy-authorization",
         "x-goog-api-key",
+        "x-livephoto-dev-auth",
+        "x-csrf-token",
     }
 )
 

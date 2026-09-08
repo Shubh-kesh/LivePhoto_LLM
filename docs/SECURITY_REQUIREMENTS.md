@@ -114,3 +114,22 @@ See `SYSTEM_CONTEXT.md` §4 (TB-1…TB-7). Notable points:
   document.
 - WebViews are treated as untrusted browser surfaces with additional navigation restrictions
   where feasible.
+## M5.8 — Secure Consumer Integration controls
+
+- **S2S auth:** JWT (RS256 via JWKS, `S2S_JWT_CLIENT_ID_CLAIM` -> `jwt_client_ids`); local_dev only
+  when `app_env in local/test/development` and structurally impossible in uat/production (Settings
+  boot-fail). Callback bearer secrets resolved from `callback.secret_env`, never in profile JSON.
+- **Launch tokens:** opaque >=256-bit, SHA-256 only persisted, TTL 600s, reopenable; reissue revokes
+  prior active tokens. Raw token never written to disk or logged; redemption redirects to a clean
+  URL with no token/business data.
+- **Browser sessions:** opaque token in HttpOnly `lp_session` cookie (SameSite=Strict, Secure outside
+  local); session-bound `lp_csrf` double-submit CSRF (HttpOnly=false) validated on every mutation.
+- **Server-authoritative decisions:** Submit requires a persisted canonical `DecisionOutcome.PASS`;
+  experimental VLM LIVE never authorizes. Test-only PASS writer registered only in
+  local/test/development with an explicit flag, never uat/prod.
+- **Callback:** URL only from consumer profile; `bearer_env`/`none`; redirects disabled; transient-only
+  retry; stable Idempotency-Key; exact-origin redirect validation; Base64 in memory only.
+- **Logging:** redaction for `base64`/`csrf`/`callback_secret`/`signature`/`launch_token`; request
+  logging uses route templates and never logs the launch-token path segment or query strings.
+- **Consumer isolation:** status/launch lookups are scoped to the authenticated consumer;
+  cross-consumer lookups behave as not-found.

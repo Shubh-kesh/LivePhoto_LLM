@@ -35,7 +35,9 @@ export function readRuntimeConfig(env: Record<string, unknown> = import.meta.env
   const cfg = (typeof window !== 'undefined' ? window.__LIVEPHOTO_CONFIG__ : undefined) ?? {}
   const apiBaseUrl = strValue(
     cfg.apiBaseUrl,
-    strValue(env.VITE_API_BASE_URL, 'http://localhost:8000'),
+    // Same-origin is the M5.8 default (empty = relative to the browser origin); LIVEPHOTO_* /
+    // VITE_API_BASE_URL keep two-origin installs working.
+    strValue(env.VITE_API_BASE_URL, ''),
   )
   const appEnv = strValue(cfg.appEnv, strValue(env.VITE_APP_ENV, 'development'))
   const vlmExperimentUiEnabled = boolValue(

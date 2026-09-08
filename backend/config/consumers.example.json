@@ -1,0 +1,24 @@
+{
+  "consumers": [
+    {
+      "consumer_id": "D365",
+      "active": false,
+      "name": "Example Dynamics 365 (safe placeholder - do not use in production)",
+      "jwt_client_ids": ["d365-livephoto-client"],
+      "callback": {
+        "url": "https://consumer.example.test/livephoto/callback",
+        "auth_type": "bearer_env",
+        "secret_env": "D365_CALLBACK_BEARER_TOKEN"
+      },
+      "allowed_redirect_origins": ["https://consumer.example.test"],
+      "request_policy": {
+        "ocr_required": [false],
+        "camera_configs": ["1"],
+        "white_background": [true],
+        "output_formats": ["jpeg"]
+      },
+      "max_attempts": 10,
+      "watermark_spec": null
+    }
+  ]
+}

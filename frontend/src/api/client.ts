@@ -23,9 +23,27 @@ interface ApiRequestOptions {
 
 const DEFAULT_TIMEOUT_MS = 10_000
 
+/** Read the session-bound CSRF cookie set by launch redemption (M5.8 §11). */
+export function readCsrfToken(): string {
+  if (typeof document === 'undefined') return ''
+  const match = document.cookie.match(/(?:^|;\s*)lp_csrf=([^;]+)/)
+  return match ? decodeURIComponent(match[1]) : ''
+}
+
+/** JSON POST helper with same-origin credentials + CSRF for browser mutations. */
+export async function apiPostJson<T>(path: string, body: unknown, timeoutMs = 15_000): Promise<T> {
+  const response = await request(path, {
+    method: 'POST',
+    body: JSON.stringify(body),
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': readCsrfToken() },
+    timeoutMs,
+  })
+  return (await response.json()) as T
+}
+
 /**
  * Minimal typed HTTP client. Centralizes base URL, request ID capture, safe error parsing and
- * timeouts. Foundation calls only (M1 §40).
+ * timeouts. Uses same-origin relative API base with credentials (cookies) for M5.8.
  */
 export async function apiRequest<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
   const response = await request(path, {
@@ -42,7 +60,12 @@ export async function apiPostMultipart(
   body: FormData,
   timeoutMs = 15_000,
 ): Promise<unknown> {
-  const response = await request(path, { method: 'POST', body, timeoutMs })
+  const response = await request(path, {
+    method: 'POST',
+    body,
+    headers: { 'X-CSRF-Token': readCsrfToken() },
+    timeoutMs,
+  })
   return (await response.json()) as unknown
 }
 
@@ -63,6 +86,7 @@ async function request(
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
       method: options.method,
+      credentials: 'include',
       headers: { Accept: 'application/json', ...(options.headers ?? {}) },
       body: options.body,
       signal: controller.signal,

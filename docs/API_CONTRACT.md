@@ -197,3 +197,27 @@ The future browser capture credential must satisfy, by design:
 
 The capture credential is separate from bank S2S credentials; the two trust models are never
 merged (see `backend/app/integrations/` docstring).
+
+## M5.8 — Secure Consumer Integration API
+
+New S2S + browser endpoints replace the ad-hoc query-string integration:
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| POST | `/api/v1/integration/launch-sessions` | S2S JWT / local_dev | Create launch (internal tx folder before capture) |
+| POST | `/api/v1/integration/transactions/{external}/launch-sessions` | S2S | Reissue (same internal tx, revoke old tokens) |
+| GET | `/api/v1/integration/transactions/{external}/status` | S2S | Consumer-isolated status (no images/Base64/secrets) |
+| GET | `/api/v1/browser/session` | browser cookie | Session state (`active`/`completed`/`invalid`/`expired`/`attempt_limit`) |
+| POST | `/api/v1/browser/attempts` | cookie + CSRF | Register a capture attempt (quality failure) |
+| POST | `/api/v1/browser/capture` | cookie + CSRF | Upload selected frame for an attempt |
+| POST | `/api/v1/browser/portrait` | cookie + CSRF | Trigger portrait (canonical PASS required) |
+| GET | `/api/v1/browser/portrait` | cookie + CSRF | Processed portrait preview |
+| POST | `/api/v1/browser/submit` | cookie + CSRF | Submit (canonical PASS + portrait) -> callback -> redirect |
+| GET | `/xbiz/live_photo/l/{token}` | opaque launch token | Redemption -> clean-URL 302 |
+
+### Intentional contract deviation
+
+The M5.8 launch token is a **reopenable launch capability token**, not a one-time capture token
+(overrides the earlier "single-use capture token" language above). It remains valid until expiry,
+reissue, completion, cancellation, or attempt-limit terminal state. The browser session cookie is
+the binding credential after redemption; each redemption rotates it.

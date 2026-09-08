@@ -15,6 +15,10 @@
 *.jks
 secrets/
 
+# ---- Consumer profiles (M5.8): real local profiles are gitignored -------------
+backend/config/consumers.local.json
+backend/config/consumers.*.secret.json
+
 # ---- Python / backend -------------------------------------------------------
 __pycache__/
 *.py[cod]

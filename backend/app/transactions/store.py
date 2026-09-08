@@ -22,7 +22,10 @@ import hashlib
 import json
 import os
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -34,8 +37,52 @@ TRANSACTION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
 MAX_ARTIFACT_BYTES = 50 * 1024 * 1024
 
 
+class TransactionStatus(StrEnum):
+    """Transaction lifecycle states (M5.8 §14).
+
+    Superset of the M5.7 free-form status strings so previously persisted values remain valid.
+    """
+
+    LAUNCHED = "LAUNCHED"
+    CREATED = "CREATED"  # legacy experiment flow
+    CAPTURE_READY = "CAPTURE_READY"
+    VLM_EVALUATED = "VLM_EVALUATED"
+    PORTRAIT_PROCESSING = "PORTRAIT_PROCESSING"
+    PORTRAIT_READY = "PORTRAIT_READY"
+    DECISION_READY = "DECISION_READY"
+    SUBMITTED = "SUBMITTED"
+    COMPLETED = "COMPLETED"
+    CALLBACK_FAILED = "CALLBACK_FAILED"
+    ATTEMPT_LIMIT_EXCEEDED = "ATTEMPT_LIMIT_EXCEEDED"
+    FAILED = "FAILED"
+    TECHNICAL_ERROR = "TECHNICAL_ERROR"
+
+    @classmethod
+    def from_value(cls, value: str) -> TransactionStatus:
+        try:
+            return cls(value)
+        except ValueError:
+            return cls.TECHNICAL_ERROR
+
+
+#: Terminal states: capture/attempts cannot restart and no further submission proceeds.
+TERMINAL_TRANSACTION_STATUSES: frozenset[TransactionStatus] = frozenset(
+    {
+        TransactionStatus.COMPLETED,
+        TransactionStatus.ATTEMPT_LIMIT_EXCEEDED,
+        TransactionStatus.FAILED,
+    }
+)
+
+
 class TransactionStorageError(Exception):
     """Typed technical storage failure (M5.7 §10, §77)."""
+
+
+def _utc_now_iso() -> str:
+    import datetime
+
+    return datetime.datetime.now(datetime.UTC).isoformat()
 
 
 class TransactionNotFoundError(TransactionStorageError):
@@ -140,12 +187,45 @@ class TransactionFileStore:
     def transaction_exists(self, transaction_id: str) -> bool:
         return self.transaction_dir(transaction_id).is_dir()
 
+    @contextmanager
+    def lock_transaction(self, transaction_id: str) -> Iterator[None]:
+        """Hold an exclusive advisory lock on a transaction for a read-modify-write block.
+
+        M5.8 shared-filesystem concurrency: status transitions, attempt counting, launch-token
+        revocation and browser-session rotation must be serialized per transaction across workers.
+        """
+        import fcntl
+
+        self._validate_transaction_id(transaction_id)
+        tx_dir = self._confine(transaction_id)
+        tx_dir.mkdir(parents=True, exist_ok=True)
+        lock_path = tx_dir / ".lock"
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            yield
+        finally:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            finally:
+                os.close(fd)
+
     def read_transaction_json(self, transaction_id: str) -> dict[str, Any]:
         return self.read_json(transaction_id, "transaction.json")
 
     def update_transaction_status(self, transaction_id: str, status: str) -> None:
         metadata = self.read_transaction_json(transaction_id)
+        current = TransactionStatus.from_value(str(metadata.get("status", "")))
+        new_status = TransactionStatus.from_value(status)
+        # Terminal states are sticky: never regress from COMPLETED / ATTEMPT_LIMIT_EXCEEDED /
+        # FAILED.
+        if (
+            current in TERMINAL_TRANSACTION_STATUSES
+            and new_status not in TERMINAL_TRANSACTION_STATUSES
+        ):
+            return
         metadata["status"] = status
+        metadata["updated_at"] = _utc_now_iso()
         self.write_json(transaction_id, "transaction.json", metadata)
 
     # ------------------------------------------------------------------ artifacts

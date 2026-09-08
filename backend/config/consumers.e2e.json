@@ -1,0 +1,24 @@
+{
+  "consumers": [
+    {
+      "consumer_id": "D365",
+      "active": true,
+      "name": "E2E D365 (test only)",
+      "jwt_client_ids": ["d365-livephoto-client"],
+      "callback": {
+        "url": "http://localhost:3001/livephoto/callback",
+        "auth_type": "none",
+        "secret_env": "D365_CALLBACK_BEARER_TOKEN"
+      },
+      "allowed_redirect_origins": ["http://localhost:3001"],
+      "request_policy": {
+        "ocr_required": [false],
+        "camera_configs": ["1"],
+        "white_background": [true],
+        "output_formats": ["jpeg"]
+      },
+      "max_attempts": 10,
+      "watermark_spec": null
+    }
+  ]
+}

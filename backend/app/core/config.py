@@ -105,6 +105,107 @@ class Settings(BaseSettings):
     #: Test-only segmentation provider ("fake") for deterministic CI/E2E (never in production).
     portrait_segmentation_provider: str = ""
 
+    # --------------------------------------------------------------------------
+    # M5.8 — Secure Consumer Integration.
+    # --------------------------------------------------------------------------
+
+    #: Browser-facing origin used to build public launch URLs (never the backend's own origin).
+    public_livephoto_base_url: str = ""
+    #: Path to the consumer-profile configuration (committed example; real profiles mounted).
+    consumer_profiles_path: str = "backend/config/consumers.example.json"
+
+    # Launch capability tokens (M5.8 §7). Opaque, >=256-bit, hash-only persistence.
+    launch_token_ttl_seconds: int = 600
+
+    # Browser session (M5.8 §10) and session-bound CSRF (M5.8 §11).
+    browser_session_ttl_seconds: int = 1800
+    browser_cookie_secure: bool = True
+    browser_cookie_samesite: Literal["strict", "lax", "none"] = "strict"
+
+    # S2S authentication (M5.8 §5). "" = unconfigured (S2S endpoints refuse).
+    s2s_auth_mode: Literal["", "jwt", "local_dev"] = ""
+    s2s_local_dev_token: SecretStr = SecretStr("")
+    s2s_jwt_issuer: str = ""
+    s2s_jwt_audience: str = "livephoto"
+    s2s_jwt_jwks_url: str = ""
+    #: JWT claim carrying the client identity mapped to ConsumerProfile.jwt_client_ids.
+    s2s_jwt_client_id_claim: str = "client_id"
+    s2s_jwt_clock_skew_seconds: int = 30
+    s2s_jwt_algorithms: tuple[str, ...] = ("RS256",)
+
+    # Outbound consumer callback (M5.8 §20-22).
+    callback_timeout_seconds: float = 10.0
+    callback_max_retries: int = 2
+
+    # Server-authoritative capture-attempt policy (M5.8 §15).
+    capture_attempt_warning_at: int = 5
+    capture_attempt_warning_again_at: int = 7
+    capture_attempt_limit: int = 10
+
+    #: Test-only canonical PASS writer; registered only when app_env in local/test/development.
+    decision_test_writer_enabled: bool = False
+
+    @field_validator(
+        "capture_attempt_warning_at", "capture_attempt_warning_again_at", "capture_attempt_limit"
+    )
+    @classmethod
+    def _validate_attempt_nonzero(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("capture attempt thresholds must be positive")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_attempt_order(self) -> Settings:
+        if not (
+            self.capture_attempt_warning_at
+            < self.capture_attempt_warning_again_at
+            < self.capture_attempt_limit
+        ):
+            raise ValueError(
+                "capture attempt thresholds must satisfy warning_at < warning_again_at < limit"
+            )
+        return self
+
+    @field_validator("s2s_jwt_clock_skew_seconds")
+    @classmethod
+    def _validate_clock_skew(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("S2S_JWT_CLOCK_SKEW_SECONDS must be >= 0")
+        return value
+
+    @property
+    def s2s_jwks_is_local_path(self) -> bool:
+        """True when JWKS is a local filesystem path (allowed only in non-uat/prod)."""
+        return self.s2s_jwt_jwks_url.startswith(("/", "./", "../"))
+
+    @model_validator(mode="after")
+    def _validate_s2s_environment_gates(self) -> Settings:
+        """Structural auth gates: local-dev auth and file-JWKS are impossible in uat/production.
+
+        Mirrors the M5.6/M5.7 app_env-gating precedent but fails at boot (stronger) rather than at
+        request time, so a misconfigured uat/prod deployment cannot start.
+        """
+        if self.app_env in ("uat", "production"):
+            if self.s2s_auth_mode == "local_dev":
+                raise ValueError(
+                    "S2S_AUTH_MODE=local_dev is forbidden in uat/production (S2S JWT required)"
+                )
+            if self.s2s_auth_mode == "jwt" and not self.s2s_jwt_jwks_url:
+                raise ValueError("S2S_AUTH_MODE=jwt requires S2S_JWT_JWKS_URL in uat/production")
+            if self.s2s_jwks_is_local_path:
+                raise ValueError("local filesystem JWKS is forbidden in uat/production")
+            if self.browser_cookie_secure is not True:
+                raise ValueError("browser session cookie must be Secure in uat/production")
+            if self.public_livephoto_base_url:
+                from urllib.parse import urlparse
+
+                parsed = urlparse(self.public_livephoto_base_url)
+                if parsed.scheme != "https" or parsed.query or parsed.fragment:
+                    raise ValueError(
+                        "PUBLIC_LIVEPHOTO_BASE_URL must be an https origin in uat/production"
+                    )
+        return self
+
     @field_validator("portrait_background_mode")
     @classmethod
     def _validate_portrait_background_mode(cls, value: str) -> str:

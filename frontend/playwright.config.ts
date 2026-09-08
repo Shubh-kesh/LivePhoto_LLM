@@ -2,18 +2,11 @@ import { defineConfig } from '@playwright/test'
 import { resolve } from 'node:path'
 
 /**
- * M2/M3 browser E2E using Chromium with a synthetic (fake) camera (M2 §74-75, §89; M3 §100-102).
+ * M5.8 E2E: same-origin topology via the Vite proxy. Fake camera + stub face/eye + fake portrait
+ * segmentation + test-only canonical PASS writer + stub consumer callback.
  *
- * - `--use-fake-ui-for-media-stream` auto-grants the camera permission prompt.
- * - `--use-file-for-fake-video-capture` streams a generated checkerboard .y4m (deterministic pixel
- *   metrics) instead of the browser's rolling pattern.
- * - `VITE_FACE_PROVIDER=stub` (webServer env) selects the deterministic stub face detector, which
- *   is controlled in-test via the in-memory `window.__LIVEPHOTO_FACE_STUB__` global. This is a
- *   test-build dependency seam — production builds never select the stub and no URL/local-storage
- *   flag can force QUALITY_READY.
- *
- * Passing Chromium E2E does NOT prove iOS Safari, Android hardware, or Windows camera-driver
- * compatibility — that requires physical-device validation (docs/CAMERA_COMPATIBILITY_MATRIX.md).
+ * The backend webServer enables S2S local-dev auth and the test-only decision writer (never
+ * available in UAT/production). No real VLM credentials or physical camera are used.
  */
 export default defineConfig({
   testDir: './e2e',
@@ -29,8 +22,6 @@ export default defineConfig({
       args: [
         '--use-fake-ui-for-media-stream',
         '--use-fake-device-for-media-stream',
-        // Resolve relative to the process cwd (Playwright transpiles the config, so import.meta.url
-        // may point to a temp directory; the E2E runs with cwd = frontend/).
         `--use-file-for-fake-video-capture=${resolve(process.cwd(), 'e2e/.fixtures/camera.y4m')}`,
         '--no-sandbox',
       ],
@@ -47,9 +38,15 @@ export default defineConfig({
         VLM_EXPERIMENT_ENABLED: 'true',
         VLM_PROVIDER: 'mock',
         VLM_TIMEOUT_SECONDS: '2',
-        // Deterministic portrait matting for E2E (no real model required in CI) + portrait on.
         PORTRAIT_PROCESSING_ENABLED: 'true',
         PORTRAIT_SEGMENTATION_PROVIDER: 'fake',
+        // M5.8: same-origin + local-dev S2S + test-only decision writer + E2E consumer fixture.
+        PUBLIC_LIVEPHOTO_BASE_URL: 'http://localhost:5173',
+        S2S_AUTH_MODE: 'local_dev',
+        S2S_LOCAL_DEV_TOKEN: 'e2e-dev-secret',
+        CONSUMER_PROFILES_PATH: 'config/consumers.e2e.json',
+        DECISION_TEST_WRITER_ENABLED: 'true',
+        FILE_STORAGE_ROOT: './local-data/e2e-file-storage',
       },
     },
     {
@@ -59,9 +56,15 @@ export default defineConfig({
       timeout: 60_000,
       env: {
         VITE_FACE_PROVIDER: 'stub',
-        // E2E always talks to the locally-provisioned backend (overrides any local frontend/.env).
-        VITE_API_BASE_URL: 'http://localhost:8000',
+        // Same-origin default (empty = relative); Vite proxies /api and /xbiz/live_photo/l.
+        VITE_API_BASE_URL: '',
       },
+    },
+    {
+      command: 'node e2e/stub-consumer.mjs',
+      url: 'http://localhost:3001',
+      reuseExistingServer: !process.env.CI,
+      timeout: 30_000,
     },
   ],
   projects: [
