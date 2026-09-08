@@ -23,6 +23,7 @@ from app.core.errors import ApiError
 from app.integrations import ConsumerRegistry
 from app.integrations.attempts import (
     AttemptResult,
+    AttemptUploadRejectedError,
     AttemptValidationError,
     read_attempt_summary,
     register_attempt,
@@ -209,15 +210,26 @@ async def browser_capture(
     mime = _validate_image(data, selected_image.content_type or "image/jpeg")
 
     # Register the attempt (capture path). Same attempt_id may already be recorded via /attempts.
-    attempt = register_attempt(
-        settings,
-        store,
-        internal_tx_id,
-        attempt_id=attempt_id,
-        result=None,
-        reason_code=None,
-        max_attempts=_max_attempts_for_tx(request, internal_tx_id, settings.capture_attempt_limit),
-    )
+    # mark_uploaded enforces one upload per attempt (a second upload for the same id is rejected).
+    try:
+        attempt = register_attempt(
+            settings,
+            store,
+            internal_tx_id,
+            attempt_id=attempt_id,
+            result=None,
+            reason_code=None,
+            max_attempts=_max_attempts_for_tx(
+                request, internal_tx_id, settings.capture_attempt_limit
+            ),
+            mark_uploaded=True,
+        )
+    except AttemptUploadRejectedError as exc:
+        raise ApiError(
+            code="UPLOAD_ALREADY_RECORDED",
+            message="This attempt already uploaded a selected original",
+            status_code=409,
+        ) from exc
     if attempt.terminal:
         return JSONResponse(_attempt_response(attempt), status_code=409)
 

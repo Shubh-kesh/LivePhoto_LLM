@@ -1335,3 +1335,132 @@ def test_validate_redirect_url_malformed_port_rejected() -> None:
     assert (
         validate_redirect_url(profile, "https://consumer.example.test:abc/", local=False) is False
     )
+
+
+def test_quality_eligible_accepted_and_counts(tmp_path) -> None:
+    app = _make_app(tmp_path)
+    with TestClient(app) as client:
+        cookies = _active_cookies(client)
+        res = client.post(
+            "/api/v1/browser/attempts",
+            data={"attempt_id": "qe-1", "result": "QUALITY_ELIGIBLE"},
+            headers=_browser_headers(cookies["lp_session"], cookies["lp_csrf"]),
+        )
+        assert res.status_code == 200, res.text
+        assert res.json()["attempt_count"] == 1
+        # No selected-original is persisted from a quality-eligible registration alone.
+        store: TransactionFileStore = app.state.transaction_store
+        internal = _internal_tx_id(client, None)
+        assert store.artifact_exists(internal, "capture/selected-original.jpg") is False
+        assert store.read_transaction_json(internal)["status"] != "CAPTURE_READY"
+
+
+def test_quality_eligible_then_capture_dedups(tmp_path) -> None:
+    app = _make_app(tmp_path)
+    with TestClient(app) as client:
+        cookies = _active_cookies(client)
+        bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+        r = client.post(
+            "/api/v1/browser/attempts",
+            data={"attempt_id": "qe-2", "result": "QUALITY_ELIGIBLE"},
+            headers=bh,
+        )
+        assert r.json()["attempt_count"] == 1
+        # Same attempt_id on /browser/capture must not increment again.
+        res = client.post(
+            "/api/v1/browser/capture",
+            data={"attempt_id": "qe-2"},
+            files={"selected_image": ("sel.jpg", _jpeg_bytes(), "image/jpeg")},
+            headers=bh,
+        )
+        assert res.status_code == 200
+        assert res.json()["attempt_count"] == 1
+        store: TransactionFileStore = app.state.transaction_store
+        internal = _internal_tx_id(client, None)
+        assert store.artifact_exists(internal, "capture/selected-original.jpg") is True
+
+
+def test_quality_eligible_with_security_reason_rejected(tmp_path) -> None:
+    app = _make_app(tmp_path)
+    with TestClient(app) as client:
+        cookies = _active_cookies(client)
+        res = client.post(
+            "/api/v1/browser/attempts",
+            data={"attempt_id": "qe-3", "result": "QUALITY_ELIGIBLE", "reason_code": "LIVE"},
+            headers=_browser_headers(cookies["lp_session"], cookies["lp_csrf"]),
+        )
+        assert res.status_code == 400
+        assert res.json()["error"]["code"] == "DISALLOWED_REASON"
+
+
+def test_quality_eligible_no_authority(tmp_path) -> None:
+    app = _make_app(tmp_path)
+    with TestClient(app) as client:
+        cookies = _active_cookies(client)
+        bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+        client.post(
+            "/api/v1/browser/attempts",
+            data={"attempt_id": "qe-4", "result": "QUALITY_ELIGIBLE"},
+            headers=bh,
+        )
+        # QUALITY_ELIGIBLE never authorizes Submit (no canonical PASS exists).
+        res = client.post("/api/v1/browser/submit", headers=bh)
+        assert res.status_code == 412
+        assert res.json()["error"]["code"] == "NOT_READY"
+
+
+def test_capture_same_attempt_id_second_upload_rejected(tmp_path) -> None:
+    app = _make_app(tmp_path)
+    with TestClient(app) as client:
+        cookies = _active_cookies(client)
+        bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+        first = client.post(
+            "/api/v1/browser/capture",
+            data={"attempt_id": "up-1"},
+            files={"selected_image": ("sel.jpg", _jpeg_bytes(), "image/jpeg")},
+            headers=bh,
+        )
+        assert first.status_code == 200
+        # A second upload with the SAME attempt_id must be rejected (one upload per attempt) so a
+        # client cannot overwrite selected-original repeatedly without consuming attempts.
+        second = client.post(
+            "/api/v1/browser/capture",
+            data={"attempt_id": "up-1"},
+            files={"selected_image": ("sel.jpg", _jpeg_bytes(64, 64), "image/jpeg")},
+            headers=bh,
+        )
+        assert second.status_code == 409
+        assert second.json()["error"]["code"] == "UPLOAD_ALREADY_RECORDED"
+        store: TransactionFileStore = app.state.transaction_store
+        internal = _internal_tx_id(client, None)
+        assert store.read_transaction_json(internal)["status"] == "CAPTURE_READY"
+
+
+def test_concurrent_capture_same_attempt_id_single_upload(tmp_path) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    app = _make_app(tmp_path)
+    with TestClient(app) as client:
+        cookies = _active_cookies(client)
+        session_cookie = cookies["lp_session"]
+        csrf = cookies["lp_csrf"]
+
+        def do_upload() -> int:
+            with TestClient(app) as c:
+                return c.post(
+                    "/api/v1/browser/capture",
+                    data={"attempt_id": "conc-up"},
+                    files={"selected_image": ("sel.jpg", _jpeg_bytes(), "image/jpeg")},
+                    headers=_browser_headers(session_cookie, csrf),
+                ).status_code
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            statuses = list(pool.map(lambda _: do_upload(), range(4)))
+
+    assert statuses.count(200) == 1  # exactly one accepted upload
+    assert statuses.count(409) == 3  # the rest rejected (one upload per attempt)
+    store: TransactionFileStore = app.state.transaction_store
+    internal = _internal_tx_id(client, None)
+    attempts = store.read_json(internal, "attempts.json")
+    assert attempts["attempt_count"] == 1
+    assert len(attempts["uploaded_attempt_ids"]) == 1

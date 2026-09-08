@@ -6,17 +6,43 @@
 import { apiPostJson, apiPostMultipart, apiRequest } from '../../api/client'
 import { browserSessionSchema, submitResultSchema, type BrowserSessionState } from './schemas'
 
+/** Allowlisted browser-reported quality reasons mirroring the backend BROWSER_REASON_ALLOWLIST. */
+const BROWSER_REASON_ALLOWLIST = new Set([
+  'NO_FACE',
+  'MULTIPLE_FACES',
+  'FACE_TOO_SMALL',
+  'FACE_TOO_LARGE',
+  'FACE_OFF_CENTER',
+  'BLURRED',
+  'UNDEREXPOSED',
+  'OVEREXPOSED',
+  'LOW_CONTRAST',
+  'RESOLUTION_TOO_LOW',
+  'EYES_CLOSED',
+  'EYE_STATE_UNKNOWN',
+  'LOW_LIGHT',
+])
+
+/** Pick the first allowlisted reason from the local quality result, or undefined. */
+export function allowlistedAttemptReason(reasonCodes: readonly string[]): string | undefined {
+  return reasonCodes.find((code) => BROWSER_REASON_ALLOWLIST.has(code))
+}
+
 export async function fetchBrowserSession(): Promise<BrowserSessionState> {
   const data: unknown = await apiRequest('/api/v1/browser/session')
   return browserSessionSchema.parse(data)
 }
 
-/** Register a frontend-only quality failure for a capture attempt (M5.8 §13). */
-export async function registerAttempt(attemptId: string, reasonCode: string): Promise<unknown> {
+/** Register a frontend-only attempt disposition for a capture attempt (M5.8 §13, M5.8.1 §8). */
+export async function registerAttempt(
+  attemptId: string,
+  result: 'QUALITY_RETRY' | 'QUALITY_ELIGIBLE',
+  reasonCode?: string,
+): Promise<unknown> {
   const form = new FormData()
   form.append('attempt_id', attemptId)
-  form.append('result', 'QUALITY_RETRY')
-  form.append('reason_code', reasonCode)
+  form.append('result', result)
+  if (reasonCode) form.append('reason_code', reasonCode)
   return apiPostMultipart('/api/v1/browser/attempts', form)
 }
 

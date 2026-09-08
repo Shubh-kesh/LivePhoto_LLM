@@ -38,16 +38,25 @@ export function CapturePage({
   faceDetector,
   analyzeBundle,
   experiment = false,
+  startStage = 'prepare',
+  onAttempt,
+  onUsePhoto,
 }: {
   faceDetector?: FaceDetectorProvider
   analyzeBundle?: (bundle: CaptureBundle) => Promise<BundleQualityAssessment>
   /** Development-only: render the VLM experiment panel (never shown on the customer path). */
   experiment?: boolean
+  /** M5.8.1: integration seam — start directly at the permission stage (skips preparation). */
+  startStage?: PreCameraStage
+  /** M5.8.1: attempt-registration seam (forwarded to the shared capture flow). */
+  onAttempt?: (attempt: import('./hooks/useCaptureFlow').CaptureAttempt) => void
+  /** M5.8.1: override the default "Use photo" confirm for integration post-capture handling. */
+  onUsePhoto?: (flow: UseCaptureFlowResult) => void | Promise<void>
 }) {
-  const [stage, setStage] = useState<PreCameraStage>('prepare')
+  const [stage, setStage] = useState<PreCameraStage>(startStage)
   const [helpOpen, setHelpOpen] = useState(false)
 
-  const flow = useCaptureFlow({ faceDetector, analyzeBundle })
+  const flow = useCaptureFlow({ faceDetector, analyzeBundle, onAttempt })
   const isFrontCamera = flow.cameraSettings.facingMode !== 'environment'
   // VLM experiment UI: OFF by default. Shown only on the explicit dev route (in dev builds) or
   // when the runtime/public config enables it for UAT (M5.6 §2, §6, §84). Backend authority still
@@ -57,9 +66,9 @@ export function CapturePage({
 
   const resetToPreparation = useCallback(() => {
     flow.reset()
-    setStage('prepare')
+    setStage(startStage)
     setHelpOpen(false)
-  }, [flow])
+  }, [flow, startStage])
 
   const cameraVisible = ['streaming', 'switchingCamera', 'capturing'].includes(flow.state)
   const cameraScreen = (
@@ -119,7 +128,7 @@ export function CapturePage({
         <ReviewScreen
           previewUrl={flow.previewUrl}
           onRetake={() => void flow.retake()}
-          onUsePhoto={flow.confirm}
+          onUsePhoto={() => (onUsePhoto ? void onUsePhoto(flow) : flow.confirm())}
           diagnostics={
             vlmUiEnabled && flow.bundle ? (
               <VlmExperimentPanel bundle={flow.bundle} quality={flow.qualityAssessment} />

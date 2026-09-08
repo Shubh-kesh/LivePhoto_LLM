@@ -1,22 +1,29 @@
 /**
- * M5.8 integration page at /xbiz/live_photo (M5.8 §28).
+ * M5.8 integration page at /xbiz/live_photo (M5.8 §28, M5.8.1).
  *
  * Bootstraps the browser session and renders the appropriate UI:
- * - active       -> capture -> portrait -> Submit (server-authoritative canonical PASS).
+ * - active       -> shared capture pipeline (CapturePage/useCaptureFlow) -> portrait -> Submit
+ *                   (server-authoritative canonical PASS).
  * - completed    -> safe terminal UI (no recapture).
  * - attempt_limit-> safe terminal UI.
  * - invalid/expired -> "link no longer available".
  *
- * All mutations are same-origin with credentials + the session-bound CSRF token. The browser never
- * sends Base64; images upload as multipart and the backend reads the processed portrait.
+ * Since M5.8.1 the integrated customer route uses the SAME real capture/quality pipeline as
+ * /capture (M2 burst capture, M3 quality, frame ranking, M5.7 eye gate, ReviewScreen) via the
+ * shared CapturePage. This page supplies only integration-specific seams: attempt registration
+ * (QUALITY_RETRY / QUALITY_ELIGIBLE with the same attempt_id) and the selected-frame upload on
+ * Use Photo. All mutations are same-origin with credentials + the session-bound CSRF token.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { Button, ScreenLayout, StatusMessage } from '../../design-system'
-import { captureCopy } from '../capture/copy'
+import { CapturePage } from '../capture/CapturePage'
+import type { CaptureAttempt } from '../capture/hooks/useCaptureFlow'
 import {
+  allowlistedAttemptReason,
   fetchBrowserSession,
+  registerAttempt,
   submitForConsumer,
   triggerPortrait,
   uploadCapture,
@@ -33,24 +40,19 @@ interface Phase {
   reasonCodes: string[]
 }
 
-const NEW_ATTEMPT_ID = (): string =>
-  typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2)}`
-
 export function IntegrationPage() {
   const [phase, setPhase] = useState<Phase | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [capturing, setCapturing] = useState(false)
-  const [cameraReady, setCameraReady] = useState(false)
-  const [frameUrl, setFrameUrl] = useState<string | null>(null)
+  const [captureDone, setCaptureDone] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const [portraitUrl, setPortraitUrl] = useState<string | null>(null)
   const [portraitState, setPortraitState] = useState<'idle' | 'processing' | 'ready' | 'error'>(
     'idle',
   )
   const [submitting, setSubmitting] = useState(false)
-  const videoRef = useRef<HTMLVideoElement | null>(null)
-  const streamRef = useRef<MediaStream | null>(null)
+  // Current capture attempt id (minted by the shared flow per Capture press). Follows the attempt
+  // through local quality analysis to the selected-frame upload. Never re-minted on upload retry.
+  const attemptIdRef = useRef<string | null>(null)
 
   const load = useCallback(async () => {
     setError(null)
@@ -78,65 +80,79 @@ export function IntegrationPage() {
     void load()
   }, [load])
 
-  useEffect(() => {
-    return () => {
-      streamRef.current?.getTracks().forEach((track) => track.stop())
-      if (frameUrl) URL.revokeObjectURL(frameUrl)
+  const applyAttemptResponse = useCallback((body: unknown) => {
+    const result = body as { attempt_count?: number; max_attempts?: number; terminal?: boolean }
+    if (typeof result?.attempt_count === 'number') {
+      setPhase((prev) =>
+        prev
+          ? {
+              ...prev,
+              attemptCount: result.attempt_count ?? prev.attemptCount,
+              maxAttempts: result.max_attempts ?? prev.maxAttempts,
+              // Server-authoritative terminal limit -> transition to the terminal UI.
+              state: result.terminal ? 'attempt_limit' : prev.state,
+            }
+          : prev,
+      )
     }
-  }, [frameUrl])
+  }, [])
 
-  const startCamera = useCallback(async () => {
-    setError(null)
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
-      streamRef.current = stream
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream
+  const handleAttempt = useCallback(
+    (attempt: CaptureAttempt) => {
+      attemptIdRef.current = attempt.attemptId
+      // Server registration is evidence/best-effort; at-most-once counting is guaranteed server-side
+      // (the later /browser/capture with the same id never double-counts).
+      if (attempt.disposition === 'QUALITY_RETRY') {
+        registerAttempt(
+          attempt.attemptId,
+          'QUALITY_RETRY',
+          allowlistedAttemptReason(attempt.reasonCodes),
+        )
+          .then(applyAttemptResponse)
+          .catch(() => undefined)
+      } else {
+        registerAttempt(attempt.attemptId, 'QUALITY_ELIGIBLE')
+          .then(applyAttemptResponse)
+          .catch(() => undefined)
       }
-      setCameraReady(true)
-    } catch {
-      setError(captureCopy.errors.cameraStartFailed.title)
-      setCameraReady(false)
-    }
-  }, [])
+    },
+    [applyAttemptResponse],
+  )
 
-  const captureFrame = useCallback(async () => {
-    const video = videoRef.current
-    if (!video || !video.srcObject) return
-    setCapturing(true)
-    setError(null)
-    const canvas = document.createElement('canvas')
-    canvas.width = video.videoWidth || 1280
-    canvas.height = video.videoHeight || 720
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-    const blob = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob(resolve, 'image/jpeg', 0.95),
-    )
-    if (!blob) {
-      setError(captureCopy.errors.qualityInternal.title)
-      setCapturing(false)
-      return
-    }
-    const id = NEW_ATTEMPT_ID()
-    try {
-      await uploadCapture(id, blob)
-      setFrameUrl(URL.createObjectURL(blob))
-      setPortraitState('idle')
-      setPortraitUrl(null)
-    } catch {
-      setError(captureCopy.errors.qualityInternal.body)
-    } finally {
-      setCapturing(false)
-    }
-  }, [])
+  const handleUsePhoto = useCallback(
+    async (flow: {
+      bundle: { frames: { id: string; blob: Blob }[]; representativeFrameId: string } | null
+    }) => {
+      if (uploading) return
+      setUploading(true)
+      setError(null)
+      try {
+        const attemptId = attemptIdRef.current
+        const selected = flow.bundle?.frames.find(
+          (frame) => frame.id === flow.bundle?.representativeFrameId,
+        )?.blob
+        if (!attemptId || !selected) {
+          setError('Your photo could not be uploaded. Please try again.')
+          return
+        }
+        await uploadCapture(attemptId, selected)
+        setCaptureDone(true)
+      } catch {
+        // Stay on Review; do not count another attempt / mint a new id. User may Retake or retry.
+        setError('Your photo could not be uploaded. Please try again.')
+      } finally {
+        setUploading(false)
+      }
+    },
+    [uploading],
+  )
 
   const preparePortrait = useCallback(async () => {
     setPortraitState('processing')
     setError(null)
     try {
-      // Dev-only canonical PASS writer (local/test/dev) + portrait processing.
+      // Dev-only canonical PASS writer (local/test/dev) + portrait processing. VLM LIVE never
+      // triggers this path; only the canonical decision does.
       await writeTestDecision()
       await triggerPortrait()
       setPortraitUrl('/api/v1/browser/portrait')
@@ -144,7 +160,7 @@ export function IntegrationPage() {
       setPhase((prev) => (prev ? { ...prev, submissionReady: true } : prev))
     } catch {
       setPortraitState('error')
-      setError(captureCopy.errors.qualityInternal.body)
+      setError('Your photo could not be prepared. Please try again.')
     }
   }, [])
 
@@ -189,72 +205,46 @@ export function IntegrationPage() {
     )
   }
 
+  if (!captureDone) {
+    return (
+      <>
+        {phase.attemptCount >= 1 && (
+          <StatusMessage variant="warning">
+            Attempt {phase.attemptCount} of {phase.maxAttempts}
+          </StatusMessage>
+        )}
+        {error && <StatusMessage variant="danger">{error}</StatusMessage>}
+        <CapturePage
+          startStage="permission"
+          onAttempt={handleAttempt}
+          onUsePhoto={handleUsePhoto}
+        />
+      </>
+    )
+  }
+
   return (
     <ScreenLayout>
-      <h1 className="lp-title">{captureCopy.review.title}</h1>
-      {phase.attemptCount >= 1 && (
-        <StatusMessage variant="warning">
-          Attempt {phase.attemptCount} of {phase.maxAttempts}
-        </StatusMessage>
-      )}
+      <h1 className="lp-title">Your photo</h1>
       {error && <StatusMessage variant="danger">{error}</StatusMessage>}
-
-      {!frameUrl ? (
+      {portraitState === 'idle' && (
+        <div className="lp-review__actions">
+          <Button variant="primary" size="lg" onClick={() => void preparePortrait()}>
+            Prepare portrait
+          </Button>
+        </div>
+      )}
+      {portraitState === 'processing' && (
+        <StatusMessage variant="info">Preparing final photo…</StatusMessage>
+      )}
+      {portraitState === 'ready' && portraitUrl && (
         <>
-          <video
-            ref={videoRef}
-            data-testid="integration-video"
-            autoPlay
-            playsInline
-            muted
-            className="lp-review__image"
-          />
+          <img className="lp-review__image" src={portraitUrl} alt="Processed portrait preview" />
           <div className="lp-review__actions">
-            <Button variant="secondary" size="lg" onClick={() => void startCamera()}>
-              Open camera
-            </Button>
-            <Button
-              variant="primary"
-              size="lg"
-              onClick={() => void captureFrame()}
-              disabled={capturing || !cameraReady}
-            >
-              {capturing ? 'Capturing…' : 'Capture photo'}
+            <Button variant="primary" size="lg" onClick={() => void submit()} disabled={submitting}>
+              {submitting ? 'Submitting…' : 'Submit photo'}
             </Button>
           </div>
-        </>
-      ) : (
-        <>
-          <img className="lp-review__image" src={frameUrl} alt="Captured photo preview" />
-          {portraitState === 'idle' && (
-            <div className="lp-review__actions">
-              <Button variant="primary" size="lg" onClick={() => void preparePortrait()}>
-                Prepare portrait
-              </Button>
-            </div>
-          )}
-          {portraitState === 'processing' && (
-            <StatusMessage variant="info">Preparing final photo…</StatusMessage>
-          )}
-          {portraitState === 'ready' && portraitUrl && (
-            <>
-              <img
-                className="lp-review__image"
-                src={portraitUrl}
-                alt="Processed portrait preview"
-              />
-              <div className="lp-review__actions">
-                <Button
-                  variant="primary"
-                  size="lg"
-                  onClick={() => void submit()}
-                  disabled={submitting}
-                >
-                  {submitting ? 'Submitting…' : 'Submit photo'}
-                </Button>
-              </div>
-            </>
-          )}
         </>
       )}
     </ScreenLayout>

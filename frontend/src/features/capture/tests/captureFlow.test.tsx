@@ -33,6 +33,7 @@ interface Harness {
 interface RenderHarnessOptions {
   useRvf?: boolean
   onBundleReady?: (bundle: CaptureBundle) => void
+  onAttempt?: (attempt: import('../hooks/useCaptureFlow').CaptureAttempt) => void
   faceDetector?: FaceDetectorProvider
   analyzeBundle?: (bundle: CaptureBundle) => Promise<BundleQualityAssessment>
 }
@@ -51,6 +52,7 @@ function renderHarness(options: RenderHarnessOptions = {}): {
   const utils = render(
     <CaptureHarness
       onBundleReady={options.onBundleReady}
+      onAttempt={options.onAttempt}
       faceDetector={detector}
       analyzeBundle={analyzeBundle}
     />,
@@ -468,5 +470,57 @@ describe('capture flow', () => {
     expect(detector.initializeCalls).toBeGreaterThanOrEqual(1)
     unmount()
     expect(detector.disposeCalls).toBeGreaterThanOrEqual(1)
+  })
+})
+
+describe('capture attempt seam (M5.8.1)', () => {
+  it('fires QUALITY_ELIGIBLE with a stable attempt id at preview, and a new id after retake+capture', async () => {
+    const attempts: import('../hooks/useCaptureFlow').CaptureAttempt[] = []
+    const { env, h } = renderHarness({
+      onAttempt: (attempt) => attempts.push(attempt),
+    })
+    await startCameraToStreaming(env, h)
+    await captureToPreview()
+    expect(attempts).toHaveLength(1)
+    expect(attempts[0].disposition).toBe('QUALITY_ELIGIBLE')
+    expect(attempts[0].reasonCodes).toEqual([])
+    const firstAttemptId = attempts[0].attemptId
+    expect(firstAttemptId).toBeTruthy()
+    expect(screen.getByTestId('attempt-id')).toHaveTextContent(firstAttemptId)
+
+    // Retake does not clear the counted attempt id; the next Capture mints a new one.
+    fireEvent.click(screen.getByText('retake'))
+    await waitFor(() => expect(phaseElement()).toHaveTextContent('requestingPermission'))
+    await startCameraToStreaming(env, h)
+    await captureToPreview()
+    expect(attempts).toHaveLength(2)
+    expect(attempts[1].attemptId).not.toBe(firstAttemptId)
+  })
+
+  it('fires QUALITY_RETRY with the aggregated reason codes', async () => {
+    const attempts: import('../hooks/useCaptureFlow').CaptureAttempt[] = []
+    const { env, h } = renderHarness({
+      onAttempt: (attempt) => attempts.push(attempt),
+      analyzeBundle: (bundle: CaptureBundle) => Promise.resolve(retryBundleAssessment(bundle)),
+    })
+    await startCameraToStreaming(env, h)
+    fireEvent.click(screen.getByText('capture'))
+    await waitFor(() => expect(phaseElement()).toHaveTextContent('qualityRetry'))
+    expect(attempts).toHaveLength(1)
+    expect(attempts[0].disposition).toBe('QUALITY_RETRY')
+    expect(attempts[0].reasonCodes.length).toBeGreaterThan(0)
+  })
+
+  it('does not fire an attempt for an analysis error', async () => {
+    const attempts: import('../hooks/useCaptureFlow').CaptureAttempt[] = []
+    const { env, h } = renderHarness({
+      onAttempt: (attempt) => attempts.push(attempt),
+      analyzeBundle: (bundle: CaptureBundle) =>
+        Promise.resolve(unavailableBundleAssessment(bundle)),
+    })
+    await startCameraToStreaming(env, h)
+    fireEvent.click(screen.getByText('capture'))
+    await waitFor(() => expect(phaseElement()).toHaveTextContent('error'))
+    expect(attempts).toHaveLength(0)
   })
 })

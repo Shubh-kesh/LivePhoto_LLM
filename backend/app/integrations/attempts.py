@@ -44,11 +44,23 @@ FORBIDDEN_BROWSER_VALUES: frozenset[str] = frozenset(
     {"PASS", "LIVE", "APPROVED", "VERIFIED", "SCREEN_REPLAY", "PRINT_ATTACK"}
 )
 
-ALLOWED_BROWSER_RESULTS: frozenset[str] = frozenset({"QUALITY_RETRY"})
+#: Browser-reported attempt dispositions. QUALITY_RETRY = local quality failure; QUALITY_ELIGIBLE =
+#: the local capture/quality pipeline produced a frame eligible for Review. Neither carries any
+#: security authority (no PASS/LIVE/VERIFIED), never creates a decision and never authorizes
+#: portrait/Submit/callback (M5.8.1 §8, §18).
+ALLOWED_BROWSER_RESULTS: frozenset[str] = frozenset({"QUALITY_RETRY", "QUALITY_ELIGIBLE"})
 
 
 class AttemptValidationError(Exception):
     """A browser-reported attempt value is disallowed/unknown (controlled validation error)."""
+
+
+class AttemptUploadRejectedError(Exception):
+    """The attempt_id already uploaded a selected-original; a second upload for it is rejected.
+
+    Enforces one upload per attempt: a client cannot overwrite ``selected-original.jpg`` repeatedly
+    with the same attempt_id without consuming attempts (M5.8.1 security review).
+    """
 
 
 @dataclass(frozen=True)
@@ -87,6 +99,7 @@ def _blank_attempts(max_attempts: int) -> dict[str, Any]:
         "warning_stages": [5, 7],
         "limit": max_attempts,
         "consumed_attempt_ids": [],
+        "uploaded_attempt_ids": [],
         "reason_codes": [],
         "updated_at": _now_iso(),
     }
@@ -115,11 +128,16 @@ def register_attempt(
     result: str | None,
     reason_code: str | None,
     max_attempts: int | None = None,
+    mark_uploaded: bool = False,
 ) -> AttemptResult:
     """Register a capture attempt at most once under the per-transaction lock (M5.8 §13, §15).
 
     The effective limit is the consumer-profile ``max_attempts`` when provided, else the global
     ``CAPTURE_ATTEMPT_LIMIT``. Warning stages always come from server settings.
+
+    ``mark_uploaded=True`` is used by ``/browser/capture``: the attempt_id is recorded as uploaded
+    and a second upload with the same id is rejected (one upload per attempt) so a client cannot
+    overwrite ``selected-original.jpg`` repeatedly without consuming attempts.
     """
     validate_result(result)
     validate_reason(reason_code)
@@ -132,6 +150,11 @@ def register_attempt(
 
     with tx_store.lock_transaction(internal_tx_id):
         attempts = _read_attempts(tx_store, internal_tx_id, effective_limit)
+        uploaded = attempts.get("uploaded_attempt_ids", [])
+        if not isinstance(uploaded, list):
+            uploaded = []
+        if mark_uploaded and id_hash in uploaded:
+            raise AttemptUploadRejectedError("attempt already uploaded a selected original")
         consumed = attempts.get("consumed_attempt_ids", [])
         if not isinstance(consumed, list):
             consumed = []
@@ -147,6 +170,9 @@ def register_attempt(
                     codes.append(reason_code)
                 attempts["reason_codes"] = codes
             attempts["updated_at"] = _now_iso()
+        if mark_uploaded and id_hash not in uploaded:
+            uploaded.append(id_hash)
+            attempts["uploaded_attempt_ids"] = uploaded
         # Server-authoritative warning/limit stages come from settings, not stored defaults.
         attempts["warning_stages"] = [
             settings.capture_attempt_warning_at,

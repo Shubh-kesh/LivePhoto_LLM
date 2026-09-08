@@ -58,6 +58,8 @@ export default defineConfig({
         VITE_FACE_PROVIDER: 'stub',
         // Same-origin default (empty = relative); Vite proxies /api and /xbiz/live_photo/l.
         VITE_API_BASE_URL: '',
+        // Exercise the optional VLM diagnostics panel on the integrated Review (M5.8.1).
+        VITE_VLM_EXPERIMENT_UI_ENABLED: 'true',
       },
     },
     {

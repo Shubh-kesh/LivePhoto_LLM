@@ -35,7 +35,8 @@ import {
   guidanceFromReasonCodes,
   type LiveGuidance,
 } from '../quality/guidance/guidance'
-import type { BundleQualityAssessment } from '../quality/types/quality'
+import type { BundleQualityAssessment, QualityReasonCode } from '../quality/types/quality'
+import { randomId } from '../utils/id'
 import { createObjectUrl, revokeObjectUrl } from '../utils/objectUrls'
 import { useCamera } from './useCamera'
 import { useLiveQuality } from './useLiveQuality'
@@ -47,6 +48,14 @@ export interface UseCaptureFlowOptions {
   faceDetector?: FaceDetectorProvider
   /** Bundle analysis override (tests inject a deterministic result). */
   analyzeBundle?: (bundle: CaptureBundle) => Promise<BundleQualityAssessment>
+  /** M5.8.1: attempt registration seam. Fires once per Capture press when local quality resolves. */
+  onAttempt?: (attempt: CaptureAttempt) => void
+}
+
+export interface CaptureAttempt {
+  attemptId: string
+  disposition: 'QUALITY_RETRY' | 'QUALITY_ELIGIBLE'
+  reasonCodes: QualityReasonCode[]
 }
 
 export interface CaptureProgress {
@@ -71,6 +80,8 @@ export interface UseCaptureFlowResult {
   retakeCount: number
   captureProgress: CaptureProgress | null
   diagnostics: CaptureDiagnostics | null
+  /** M5.8.1: opaque attempt id for the current capture attempt (null until Capture is pressed). */
+  attemptId: string | null
 
   // M3 quality
   detectorState: FaceDetectorProviderState
@@ -125,9 +136,14 @@ export function useCaptureFlow(options: UseCaptureFlowOptions = {}): UseCaptureF
   const cameraStartMsRef = useRef<number | null>(null)
   const cameraSettingsRef = useRef<SafeTrackSettings>({})
   const cameraStopRef = useRef<() => void>(() => undefined)
+  // M5.8.1: opaque attempt id minted per Capture press; follows the attempt through local quality
+  // analysis and (optionally) the selected-frame upload. Cleared on reset; retake mints a new id.
+  const attemptIdRef = useRef<string | null>(null)
 
   const onBundleReadyRef = useRef(options.onBundleReady)
   onBundleReadyRef.current = options.onBundleReady
+  const onAttemptRef = useRef(options.onAttempt)
+  onAttemptRef.current = options.onAttempt
 
   const analyzeBundleForFlow = useRef<(bundle: CaptureBundle) => Promise<BundleQualityAssessment>>(
     () => Promise.reject(new QualityError('QUALITY_ANALYSIS_ERROR')),
@@ -261,6 +277,9 @@ export function useCaptureFlow(options: UseCaptureFlowOptions = {}): UseCaptureF
   const capture = useCallback(async (): Promise<void> => {
     if (readPhase() !== 'streaming') return
     setTransientMessage(null)
+    // One Capture press = one opaque attempt id (M5.8.1 §6). Minted here so it follows the whole
+    // attempt through local quality analysis and a possible selected-frame upload.
+    attemptIdRef.current = randomId()
     transition({ type: 'CAPTURE' })
 
     const video = videoRef.current
@@ -327,6 +346,16 @@ export function useCaptureFlow(options: UseCaptureFlowOptions = {}): UseCaptureF
         cameraStop()
         setQualityAssessment(assessment)
 
+        // M5.8.1: quality-eligible attempt reaches the server before Review (no authority).
+        const attemptId = attemptIdRef.current
+        if (attemptId && onAttemptRef.current) {
+          onAttemptRef.current({
+            attemptId,
+            disposition: 'QUALITY_ELIGIBLE',
+            reasonCodes: [],
+          })
+        }
+
         const totalFlowMs = flowStartedAtRef.current ? now() - flowStartedAtRef.current : null
         const totalBytes = result.frames.reduce((sum, f) => sum + f.byteSize, 0)
         setDiagnostics({
@@ -346,6 +375,15 @@ export function useCaptureFlow(options: UseCaptureFlowOptions = {}): UseCaptureF
         bundleRef.current = bundle
         setQualityAssessment(assessment)
         setRetryGuidance(buildLiveGuidance(guidanceFromReasonCodes(assessment.reasonCodes)))
+        // M5.8.1: local quality failure registered server-side (allowlisted reasons only).
+        const attemptId = attemptIdRef.current
+        if (attemptId && onAttemptRef.current) {
+          onAttemptRef.current({
+            attemptId,
+            disposition: 'QUALITY_RETRY',
+            reasonCodes: assessment.reasonCodes,
+          })
+        }
         transition({ type: 'ANALYSIS_RETRY' })
       } else {
         cameraStop()
@@ -418,6 +456,7 @@ export function useCaptureFlow(options: UseCaptureFlowOptions = {}): UseCaptureF
     cameraStop()
     revokeObjectUrl(previewUrlRef.current)
     previewUrlRef.current = null
+    attemptIdRef.current = null
     setPreviewUrl(null)
     bundleRef.current = null
     setBundle(null)
@@ -482,6 +521,7 @@ export function useCaptureFlow(options: UseCaptureFlowOptions = {}): UseCaptureF
     retakeCount,
     captureProgress,
     diagnostics,
+    attemptId: attemptIdRef.current,
     detectorState: liveQuality.detectorState,
     liveGuidance: liveQuality.guidance,
     isLiveReady: liveQuality.isReady,
