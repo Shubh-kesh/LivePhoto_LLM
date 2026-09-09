@@ -159,6 +159,31 @@ def browser_session(request: Request) -> Response:
         }
     )
 
+@router.get("/portrait")
+def browser_portrait_image(request: Request) -> Response:
+    record = require_active_session(request)
+    internal_tx_id = record["transaction_id"]
+    store = _store(request)
+    path = "portrait/processed.jpg"
+
+    if not store.artifact_exists(internal_tx_id, path):
+        raise ApiError(
+            code="PORTRAIT_NOT_READY",
+            message="Portrait is not ready",
+            status_code=404,
+        )
+
+    data = store.read_artifact(internal_tx_id, path)
+
+    return Response(
+        content=data,
+        media_type="image/jpeg",
+        headers={
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
 
 @router.post("/attempts")
 def browser_attempts(
@@ -290,21 +315,21 @@ async def browser_portrait(request: Request, face_box: str = Form("")) -> Respon
     )
 
 
-@router.get("/portrait")
-def browser_portrait_image(request: Request) -> Response:
-    record = require_active_session(request)
-    require_csrf(request, record)
-    internal_tx_id = record["transaction_id"]
-    store = _store(request)
-    path = "portrait/processed.jpg"
-    if not store.artifact_exists(internal_tx_id, path):
-        raise ApiError(code="PORTRAIT_NOT_READY", message="Portrait is not ready", status_code=404)
-    data = store.read_artifact(internal_tx_id, path)
-    return Response(
-        content=data,
-        media_type="image/jpeg",
-        headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
-    )
+# @router.get("/portrait")
+# def browser_portrait_image(request: Request) -> Response:
+#     record = require_active_session(request)
+#     require_csrf(request, record)
+#     internal_tx_id = record["transaction_id"]
+#     store = _store(request)
+#     path = "portrait/processed.jpg"
+#     if not store.artifact_exists(internal_tx_id, path):
+#         raise ApiError(code="PORTRAIT_NOT_READY", message="Portrait is not ready", status_code=404)
+#     data = store.read_artifact(internal_tx_id, path)
+#     return Response(
+#         content=data,
+#         media_type="image/jpeg",
+#         headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+#     )
 
 
 @router.post("/submit")
