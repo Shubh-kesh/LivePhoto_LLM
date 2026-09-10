@@ -100,6 +100,24 @@ def passport_crop(
     crop_height = max(16, round(width_needed / PORTRAIT_ASPECT))
     crop_width = int(crop_height * PORTRAIT_ASPECT)
 
+    # --- Fit: never larger than the source in EITHER dimension ----------------
+    # A 3:4 frame must satisfy frame_width = 0.75 * frame_height. The largest such frame that fits
+    # inside the source is bounded by BOTH width and height. Scale the desired frame down to that
+    # limit so CropBox coordinates are always inside the source — fixes mobile portrait sources
+    # where the desired 3:4 crop width exceeds the source width (e.g. 720x1280 with a desired width
+    # of 1143 would otherwise yield a negative x0).
+    if crop_width > width or crop_height > height:
+        fit_height = height
+        fit_width = int(fit_height * PORTRAIT_ASPECT)
+        if fit_width > width:
+            fit_width = width
+            fit_height = round(fit_width / PORTRAIT_ASPECT)
+        crop_width = max(12, min(crop_width, fit_width))
+        crop_height = max(12, min(crop_height, fit_height))
+    # Defensive invariants regardless of integer rounding:
+    crop_width = min(crop_width, width)
+    crop_height = min(crop_height, height)
+
     # --- Top margin: above the head AND strictly above the hair --------------
     hair_pad = max(2, int(HAIR_PAD_RATIO * crop_height))
     crop_top = head_top - int(TOP_MARGIN_RATIO * crop_height)
@@ -156,18 +174,6 @@ def passport_crop(
     if crop_top < 0:
         crop_top = 0
         crop_bottom = min(crop_top + crop_height, height)
-
-    # If the source cannot fit the 3:4 frame, scale the frame down to fit exactly.
-    crop_height_actual = crop_bottom - crop_top
-    if crop_height_actual < crop_height:
-        crop_height = max(12, crop_height_actual)
-        crop_width = int(crop_height * PORTRAIT_ASPECT)
-        crop_x0 = desired_center_x - crop_width // 2
-        if crop_x0 < 0:
-            crop_x0 = 0
-        if crop_x0 + crop_width > width:
-            crop_x0 = width - crop_width
-        crop_x1 = crop_x0 + crop_width
 
     crop_width = crop_x1 - crop_x0
     crop_height = crop_bottom - crop_top

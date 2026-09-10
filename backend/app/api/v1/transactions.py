@@ -21,7 +21,10 @@ from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import Response
 
 from app.core.config import Settings
+from app.core.errors import ApiError
+from app.experiments.vlm import liveness
 from app.portrait import PortraitErrorCode, PortraitProcessingError, PortraitProcessor
+from app.providers.vision import VlmError
 from app.transactions import (
     ARTIFACT_RELATIVE_PATHS,
     ArtifactNotFoundError,
@@ -159,6 +162,117 @@ def get_artifact(request: Request, transaction_id: str, artifact_type: str) -> R
     return Response(content=data, headers=headers, media_type=content_type)
 
 
+@router.post("/{transaction_id}/liveness")
+async def evaluate_liveness(
+    request: Request,
+    transaction_id: str,
+) -> dict[str, Any]:
+    """Server-authoritative liveness evaluation of a stored capture (standalone /capture).
+
+    Experiment-gated (hard-blocked in uat/production). The authoritative provider comes ONLY from
+    ``VLM_PROVIDER``; the browser cannot choose it. The evaluation identity is derived SERVER-SIDE
+    from the stored capture (selected-original SHA-256); a client-supplied attempt_id is not
+    accepted, so a client cannot create multiple evaluations for the same stored image. Provider
+    calls are single-flight per identity and failures are cached. The normalized result is persisted
+    to ``vlm/result.json`` so the LIVE-gated ``/portrait`` endpoint can proceed only for
+    backend-confirmed LIVE.
+    """
+    _guard_experiment(request)
+    _tx_id_or_error(transaction_id)
+    store = _store(request)
+    settings = _settings(request)
+    if not store.transaction_exists(transaction_id):
+        raise ArtifactNotFoundError("transaction not found")
+
+    key = liveness.current_capture_key(store, transaction_id)
+    if key is None:
+        raise ArtifactNotFoundError("no capture stored for this transaction")
+    identity = liveness.liveness_identity(key["attempt_id"], key["selected_sha256"])
+
+    # Short lock: cache/claim check (never hold the lock across the provider call).
+    with store.lock_transaction(transaction_id):
+        cached = liveness.read_evaluation(store, transaction_id, identity)
+        if cached is not None:
+            return _liveness_safe_response(cached)
+        if liveness.is_evaluation_claimed(store, transaction_id, identity):
+            if liveness.evaluation_claim_ready(store, transaction_id, identity, settings):
+                liveness.clear_evaluation_claim(store, transaction_id, identity)
+            else:
+                raise ApiError(
+                    code="LIVENESS_IN_PROGRESS",
+                    message="Liveness evaluation is already in progress",
+                    status_code=202,
+                )
+        liveness.set_evaluation_claim(store, transaction_id, identity)
+
+    try:
+        evaluation = await liveness.evaluate_capture(
+            settings,
+            store,
+            transaction_id,
+            attempt_id=key["attempt_id"],
+            selected_sha256=key["selected_sha256"],
+        )
+    except VlmError as exc:
+        with store.lock_transaction(transaction_id):
+            err_now_key = liveness.current_capture_key(store, transaction_id)
+            liveness.clear_evaluation_claim(store, transaction_id, identity)
+            if err_now_key is not None:
+                err_now_identity = liveness.liveness_identity(
+                    err_now_key["attempt_id"], err_now_key["selected_sha256"]
+                )
+                if err_now_identity == identity:
+                    liveness.persist_error_evaluation(
+                        store,
+                        transaction_id,
+                        identity,
+                        attempt_id=err_now_key["attempt_id"],
+                        selected_sha256=err_now_key["selected_sha256"],
+                        error_code=exc.code.value,
+                    )
+        raise
+
+    with store.lock_transaction(transaction_id):
+        now_key = liveness.current_capture_key(store, transaction_id)
+        now_identity: str | None = (
+            liveness.liveness_identity(now_key["attempt_id"], now_key["selected_sha256"])
+            if now_key
+            else None
+        )
+        liveness.clear_evaluation_claim(store, transaction_id, identity)
+        if now_identity != identity:
+            liveness.persist_evaluation(
+                store, transaction_id, identity, dict(evaluation, stale=True, promoted=False)
+            )
+            raise ApiError(
+                code="STALE_EVALUATION",
+                message="The capture changed during evaluation; please try again.",
+                status_code=409,
+            )
+        liveness.persist_evaluation(store, transaction_id, identity, evaluation)
+        if evaluation.get("error"):
+            raise ApiError(
+                code="LIVENESS_UNAVAILABLE",
+                message="We couldn't verify your photo. Please try again.",
+                status_code=502,
+            )
+        liveness.persist_normalized_vlm_result(
+            store,
+            transaction_id,
+            evaluation,
+            request_id=request.scope.get("request_id", ""),
+        )
+        return _liveness_safe_response(evaluation)
+
+
+def _liveness_safe_response(evaluation: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "classification": evaluation.get("classification"),
+        "outcome": evaluation.get("outcome"),
+        "portrait_allowed": evaluation.get("portrait_allowed", False),
+    }
+
+
 @router.post("/{transaction_id}/portrait")
 async def process_portrait(
     request: Request,
@@ -172,13 +286,6 @@ async def process_portrait(
     if not store.transaction_exists(transaction_id):
         raise ArtifactNotFoundError("transaction not found")
 
-    settings = _settings(request)
-    if not settings.portrait_processing_enabled:
-        raise PortraitProcessingError(
-            PortraitErrorCode.PORTRAIT_PROCESSING_FAILED,
-            "portrait processing is disabled",
-        )
-
     vlm_relative = ARTIFACT_RELATIVE_PATHS[ArtifactType.VLM_RESULT]
     if not store.artifact_exists(transaction_id, vlm_relative):
         raise PortraitProcessingError(
@@ -190,6 +297,23 @@ async def process_portrait(
         raise PortraitProcessingError(
             PortraitErrorCode.PORTRAIT_PROCESSING_FAILED,
             "portrait processing requires a LIVE experimental result",
+        )
+
+    return await _run_portrait_processing(request, transaction_id, face_box)
+
+
+async def _run_portrait_processing(
+    request: Request,
+    transaction_id: str,
+    face_box: str,
+) -> dict[str, Any]:
+    """Shared portrait pipeline used by the experiment portrait endpoints (M5.7 §23-27)."""
+    settings = _settings(request)
+    store = _store(request)
+    if not settings.portrait_processing_enabled:
+        raise PortraitProcessingError(
+            PortraitErrorCode.PORTRAIT_PROCESSING_FAILED,
+            "portrait processing is disabled",
         )
 
     face_box_normalized: tuple[float, float, float, float] | None = None

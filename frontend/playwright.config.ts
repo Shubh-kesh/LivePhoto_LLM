@@ -37,15 +37,17 @@ export default defineConfig({
       env: {
         VLM_EXPERIMENT_ENABLED: 'true',
         VLM_PROVIDER: 'mock',
+        // Deterministic authoritative liveness for the happy-path E2Es (server-configured, never a
+        // browser-supplied value; mock provider is only available in local/test/dev).
+        VLM_MOCK_BEHAVIOR: 'live',
         VLM_TIMEOUT_SECONDS: '2',
         PORTRAIT_PROCESSING_ENABLED: 'true',
         PORTRAIT_SEGMENTATION_PROVIDER: 'fake',
-        // M5.8: same-origin + local-dev S2S + test-only decision writer + E2E consumer fixture.
+        // M5.8: same-origin + local-dev S2S + E2E consumer fixture.
         PUBLIC_LIVEPHOTO_BASE_URL: 'http://localhost:5173',
         S2S_AUTH_MODE: 'local_dev',
         S2S_LOCAL_DEV_TOKEN: 'e2e-dev-secret',
         CONSUMER_PROFILES_PATH: 'config/consumers.e2e.json',
-        DECISION_TEST_WRITER_ENABLED: 'true',
         FILE_STORAGE_ROOT: './local-data/e2e-file-storage',
       },
     },

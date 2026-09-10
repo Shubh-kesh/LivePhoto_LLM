@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import datetime
+import hashlib
 import http.server
 import io
 import json
@@ -19,6 +22,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from app.core.config import Settings
+from app.experiments.vlm import liveness
 from app.factory import create_app
 from app.integrations.callback import build_callback_event_id
 from app.integrations.store import external_key_hash
@@ -122,6 +126,17 @@ def _cookies_from_response(response) -> dict[str, str]:
 
 def _browser_headers(session_cookie: str, csrf: str) -> dict[str, str]:
     return {"Cookie": f"lp_session={session_cookie}", "X-CSRF-Token": csrf}
+
+
+def _live_portrait(client: TestClient, cookies: dict[str, str]):
+    """Capture is already uploaded: run authoritative liveness (LIVE) then generate the portrait."""
+    bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+    lv = client.post("/api/v1/browser/liveness", headers=bh)
+    assert lv.status_code == 200, lv.text
+    assert lv.json()["portrait_allowed"] is True
+    portrait = client.post("/api/v1/browser/portrait", headers=bh)
+    assert portrait.status_code == 200, portrait.text
+    return bh
 
 
 # ------------------------------------------------------------------ S2S auth
@@ -720,16 +735,13 @@ def test_full_submit_flow(tmp_path) -> None:
                 }
             },
         )
-        app = _make_app(tmp_path, consumers=[profile])
+        app = _make_app(
+            tmp_path, consumers=[profile], vlm_provider="mock", vlm_mock_behavior="live"
+        )
         with TestClient(app) as client:
             cookies = _redeem_and_capture(client)
-            bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
-            # canonical PASS via dev writer
-            dev = client.post("/api/v1/dev/test-decision", headers=bh)
-            assert dev.status_code == 200, dev.text
-            # portrait
-            portrait = client.post("/api/v1/browser/portrait", headers=bh)
-            assert portrait.status_code == 200, portrait.text
+            # Server-authoritative liveness (LIVE) -> canonical PASS -> portrait.
+            bh = _live_portrait(client, cookies)
             # submit
             res = client.post("/api/v1/browser/submit", headers=bh)
             assert res.status_code == 200, res.text
@@ -782,12 +794,12 @@ def test_completed_reopen_terminal(tmp_path) -> None:
                 }
             },
         )
-        app = _make_app(tmp_path, consumers=[profile])
+        app = _make_app(
+            tmp_path, consumers=[profile], vlm_provider="mock", vlm_mock_behavior="live"
+        )
         with TestClient(app) as client:
             cookies = _redeem_and_capture(client)
-            bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
-            client.post("/api/v1/dev/test-decision", headers=bh)
-            client.post("/api/v1/browser/portrait", headers=bh)
+            bh = _live_portrait(client, cookies)
             assert client.post("/api/v1/browser/submit", headers=bh).status_code == 200
             # reopen via reissue -> TERMINAL completed session, cannot mutate
             reissue = client.post(
@@ -863,12 +875,12 @@ def test_portrait_integrity_and_base64_not_persisted(tmp_path) -> None:
                 }
             },
         )
-        app = _make_app(tmp_path, consumers=[profile])
+        app = _make_app(
+            tmp_path, consumers=[profile], vlm_provider="mock", vlm_mock_behavior="live"
+        )
         with TestClient(app) as client:
             cookies = _redeem_and_capture(client)
-            bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
-            client.post("/api/v1/dev/test-decision", headers=bh)
-            client.post("/api/v1/browser/portrait", headers=bh)
+            bh = _live_portrait(client, cookies)
             assert client.post("/api/v1/browser/submit", headers=bh).status_code == 200
             payload = json.loads(received["body"])
             decoded = base64.b64decode(payload["processed_jpeg_base64"])
@@ -1274,12 +1286,12 @@ def test_concurrent_submit_single_callback(tmp_path) -> None:
                 }
             },
         )
-        app = _make_app(tmp_path, consumers=[profile])
+        app = _make_app(
+            tmp_path, consumers=[profile], vlm_provider="mock", vlm_mock_behavior="live"
+        )
         with TestClient(app) as client:
             cookies = _redeem_and_capture(client)
-            bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
-            client.post("/api/v1/dev/test-decision", headers=bh)
-            assert client.post("/api/v1/browser/portrait", headers=bh).status_code == 200
+            _live_portrait(client, cookies)
 
             def submit() -> int:
                 with TestClient(app) as c:
@@ -1464,3 +1476,1040 @@ def test_concurrent_capture_same_attempt_id_single_upload(tmp_path) -> None:
     attempts = store.read_json(internal, "attempts.json")
     assert attempts["attempt_count"] == 1
     assert len(attempts["uploaded_attempt_ids"]) == 1
+
+
+# ------------------------------------------------------- browser liveness (pre-M6 Groq gate)
+def _liveness_app(tmp_path, **overrides: object):
+    kwargs = {
+        "vlm_provider": "mock",
+        "vlm_mock_behavior": "live",
+        "vlm_timeout_seconds": 1.0,
+    }
+    kwargs.update(overrides)
+    return _make_app(tmp_path, **kwargs)
+
+
+def _capture_and_liveness(
+    client: TestClient, cookies: dict[str, str], attempt_id: str, jpeg: bytes | None = None
+):
+    bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+    cap = client.post(
+        "/api/v1/browser/capture",
+        data={"attempt_id": attempt_id},
+        files={"selected_image": ("sel.jpg", jpeg or _jpeg_bytes(), "image/jpeg")},
+        headers=bh,
+    )
+    assert cap.status_code == 200, cap.text
+    return client.post("/api/v1/browser/liveness", data={"attempt_id": attempt_id}, headers=bh)
+
+
+def test_browser_liveness_requires_session(tmp_path) -> None:
+    app = _liveness_app(tmp_path)
+    with TestClient(app) as client:
+        res = client.post("/api/v1/browser/liveness", data={"attempt_id": "a1"})
+        assert res.status_code == 401
+
+
+def test_browser_liveness_requires_csrf(tmp_path) -> None:
+    app = _liveness_app(tmp_path)
+    with TestClient(app) as client:
+        cookies = _active_cookies(client)
+        res = client.post(
+            "/api/v1/browser/liveness",
+            data={"attempt_id": "a1"},
+            headers={"Cookie": f"lp_session={cookies['lp_session']}"},
+        )
+        assert res.status_code == 403
+
+
+def test_browser_liveness_uses_configured_provider_not_browser(tmp_path) -> None:
+    app = _liveness_app(tmp_path)
+    with TestClient(app) as client:
+        cookies = _active_cookies(client)
+        bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+        client.post(
+            "/api/v1/browser/capture",
+            data={"attempt_id": "a1"},
+            files={"selected_image": ("sel.jpg", _jpeg_bytes(), "image/jpeg")},
+            headers=bh,
+        )
+        # The browser-supplied provider/behavior fields are ignored by the endpoint; the configured
+        # settings provider (mock) produced the result (LIVE via settings.vlm_mock_behavior).
+        res = client.post(
+            "/api/v1/browser/liveness",
+            data={"attempt_id": "a1", "provider": "gemini", "mock_behavior": "screen_replay"},
+            headers=bh,
+        )
+        assert res.status_code == 200, res.text
+        body = res.json()
+        assert body["classification"] == "LIVE"
+        assert body["outcome"] == "PASS"
+        assert body["portrait_allowed"] is True
+
+
+def test_browser_liveness_live_writes_canonical_pass_and_portrait(tmp_path) -> None:
+    app = _liveness_app(tmp_path)
+    with TestClient(app) as client:
+        cookies = _active_cookies(client)
+        res = _capture_and_liveness(client, cookies, "a1")
+        assert res.status_code == 200, res.text
+        assert res.json()["outcome"] == "PASS"
+        store: TransactionFileStore = app.state.transaction_store
+        internal = _internal_tx_id(client, None)
+        from app.transactions.decisions import read_decision
+
+        decision = read_decision(store, internal)
+        assert decision is not None and decision.outcome.value == "PASS"
+        assert decision.decision_source == "vlm"
+        assert decision.metadata.get("provider") == "mock"
+        # LIVE -> portrait endpoint succeeds.
+        bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+        portrait = client.post("/api/v1/browser/portrait", headers=bh)
+        assert portrait.status_code == 200, portrait.text
+
+
+def test_browser_liveness_non_live_no_pass_portrait_blocked(tmp_path) -> None:
+    app = _liveness_app(tmp_path, vlm_mock_behavior="screen_replay")
+    with TestClient(app) as client:
+        cookies = _active_cookies(client)
+        res = _capture_and_liveness(client, cookies, "a1")
+        assert res.status_code == 200
+        body = res.json()
+        assert body["classification"] == "SCREEN_REPLAY"
+        assert body["outcome"] == "FAIL"
+        assert body["portrait_allowed"] is False
+        store: TransactionFileStore = app.state.transaction_store
+        internal = _internal_tx_id(client, None)
+        from app.transactions.decisions import read_decision
+
+        assert read_decision(store, internal).outcome.value == "FAIL"
+        # Portrait must still be blocked server-side (no canonical PASS).
+        bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+        portrait = client.post("/api/v1/browser/portrait", headers=bh)
+        assert portrait.status_code == 412
+
+
+@pytest.mark.parametrize(
+    ("behavior", "expected_outcome"),
+    [
+        ("print", "FAIL"),
+        ("quality_failure", "RETRY"),
+        ("uncertain", "RETRY"),
+    ],
+)
+def test_browser_liveness_mapping(tmp_path, behavior: str, expected_outcome: str) -> None:
+    app = _liveness_app(tmp_path, vlm_mock_behavior=behavior)
+    with TestClient(app) as client:
+        cookies = _active_cookies(client)
+        res = _capture_and_liveness(client, cookies, "a1")
+        assert res.status_code == 200
+        body = res.json()
+        assert body["portrait_allowed"] is False
+        assert body["outcome"] == expected_outcome
+        # No portrait for non-LIVE.
+        bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+        assert client.post("/api/v1/browser/portrait", headers=bh).status_code == 412
+
+
+def test_browser_liveness_provider_failure_no_pass(tmp_path) -> None:
+    app = _liveness_app(tmp_path, vlm_mock_behavior="auth")
+    with TestClient(app) as client:
+        cookies = _active_cookies(client)
+        res = _capture_and_liveness(client, cookies, "a1")
+        assert res.status_code == 502
+        assert res.json()["error"]["code"] == "LIVENESS_UNAVAILABLE"
+        store: TransactionFileStore = app.state.transaction_store
+        internal = _internal_tx_id(client, None)
+        from app.transactions.decisions import read_decision
+
+        decision = read_decision(store, internal)
+        # Fail closed: no PASS, no decision.
+        assert decision is None or decision.outcome.value != "PASS"
+        bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+        assert client.post("/api/v1/browser/portrait", headers=bh).status_code == 412
+
+
+def test_browser_liveness_idempotent_single_provider_call(tmp_path, monkeypatch) -> None:
+    from app.experiments.vlm import VlmEvaluationService
+
+    calls: list[int] = [0]
+    original = VlmEvaluationService.evaluate
+
+    async def counting_evaluate(self, request):
+        calls[0] += 1
+        return await original(self, request)
+
+    monkeypatch.setattr(VlmEvaluationService, "evaluate", counting_evaluate)
+    app = _liveness_app(tmp_path)
+    with TestClient(app) as client:
+        cookies = _active_cookies(client)
+        bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+        client.post(
+            "/api/v1/browser/capture",
+            data={"attempt_id": "idem-1"},
+            files={"selected_image": ("sel.jpg", _jpeg_bytes(), "image/jpeg")},
+            headers=bh,
+        )
+        first = client.post("/api/v1/browser/liveness", data={"attempt_id": "idem-1"}, headers=bh)
+        second = client.post("/api/v1/browser/liveness", data={"attempt_id": "idem-1"}, headers=bh)
+        assert first.status_code == 200 and second.status_code == 200
+        assert first.json() == second.json()
+    assert calls[0] == 1  # second evaluation served from persisted record
+
+
+def test_browser_liveness_new_capture_fresh_evaluation(tmp_path, monkeypatch) -> None:
+    from app.experiments.vlm import VlmEvaluationService
+
+    calls: list[int] = [0]
+    original = VlmEvaluationService.evaluate
+
+    async def counting_evaluate(self, request):
+        calls[0] += 1
+        return await original(self, request)
+
+    monkeypatch.setattr(VlmEvaluationService, "evaluate", counting_evaluate)
+    app = _liveness_app(tmp_path)
+    with TestClient(app) as client:
+        cookies = _active_cookies(client)
+        _capture_and_liveness(client, cookies, "cap-1")
+        # A NEW capture (new attempt id + new image) must trigger a fresh evaluation.
+        _capture_and_liveness(client, cookies, "cap-2", _jpeg_bytes(64, 64))
+    assert calls[0] == 2
+
+
+def test_liveness_service_blocked_in_production(tmp_path) -> None:
+    """The authoritative liveness service refuses to operate in production (providers blocked)."""
+    import pytest as _pytest_module
+
+    settings = Settings(
+        _env_file=None,
+        app_env="production",
+        vlm_provider="mock",
+        file_storage_root=str(tmp_path / "s"),
+        vlm_experiment_enabled=True,
+    )
+    store = TransactionFileStore(str(tmp_path / "s"))
+    store.initialize()
+    from app.transactions import ArtifactType
+
+    tx_id = "0" * 32
+    store.create_transaction(tx_id, {"transaction_id": tx_id, "status": "CAPTURE_READY"})
+    store.write_artifact(
+        tx_id,
+        ArtifactType.SELECTED_ORIGINAL_CAPTURE,
+        _jpeg_bytes(),
+        content_type="image/jpeg",
+    )
+    from app.experiments.vlm import liveness
+    from app.providers.vision import VlmError, VlmErrorCode
+
+    with _pytest_module.raises(VlmError) as exc_info:
+        import asyncio
+
+        asyncio.run(
+            liveness.evaluate_capture(settings, store, tx_id, attempt_id="a1", selected_sha256="s")
+        )
+    assert exc_info.value.code == VlmErrorCode.VLM_DISABLED
+
+
+def test_customer_xbiz_path_works_without_test_writer(tmp_path) -> None:
+    """Acceptance: DECISION_TEST_WRITER_ENABLED=false still completes the xbiz happy path when the
+    authoritative provider (mock, LIVE) confirms liveness — Groq, not the test PASS writer, gates
+    portrait eligibility."""
+    delivered: list[int] = [0]
+
+    def h(self) -> None:
+        self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        delivered[0] += 1
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(b'{"redirect_url": "http://localhost:3001/complete"}')
+
+    srv, port = _serving_server(h)
+    try:
+        profile = dict(
+            D365,
+            **{
+                "callback": {
+                    "url": f"http://127.0.0.1:{port}/cb",
+                    "auth_type": "none",
+                    "secret_env": "",
+                }
+            },
+        )
+        app = _make_app(
+            tmp_path,
+            consumers=[profile],
+            decision_test_writer_enabled=False,
+            vlm_provider="mock",
+            vlm_mock_behavior="live",
+        )
+        with TestClient(app) as client:
+            cookies = _active_cookies(client)
+            bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+            client.post(
+                "/api/v1/browser/capture",
+                data={"attempt_id": "ok-1"},
+                files={"selected_image": ("sel.jpg", _jpeg_bytes(), "image/jpeg")},
+                headers=bh,
+            )
+            liv = client.post("/api/v1/browser/liveness", data={"attempt_id": "ok-1"}, headers=bh)
+            assert liv.status_code == 200, liv.text
+            assert liv.json()["portrait_allowed"] is True
+            portrait = client.post("/api/v1/browser/portrait", headers=bh)
+            assert portrait.status_code == 200, portrait.text
+            submit = client.post("/api/v1/browser/submit", headers=bh)
+            assert submit.status_code == 200, submit.text
+            assert submit.json()["redirect_url"] == "http://localhost:3001/complete"
+            assert delivered[0] == 1
+            # The dev test-writer route is NOT registered (flag false).
+            assert client.post("/api/v1/dev/test-decision").status_code == 404
+    finally:
+        srv.shutdown()
+
+
+# ------------------------------------------------------- pre-M6 hardening tests (A-G)
+
+
+def _bound_pass_decision(app, internal_tx_id: str, attempt_id: str, image_sha: str) -> None:
+    """Write a canonical PASS bound to an arbitrary (attempt, sha) to simulate a stale promotion."""
+    from app.transactions.decisions import build_decision, write_decision
+
+    store = app.state.transaction_store
+    identity = hashlib.sha256(f"{attempt_id}:{image_sha}".encode()).hexdigest()
+    decision = build_decision(
+        internal_tx_id,
+        outcome="PASS",
+        source="vlm",
+        version="liveness-v1",
+        metadata={
+            "attempt_id": attempt_id,
+            "selected_sha256": image_sha,
+            "liveness_identity": identity,
+        },
+    )
+    write_decision(store, internal_tx_id, decision)
+
+
+def _capture(client: TestClient, cookies: dict[str, str], attempt_id: str, jpeg: bytes) -> None:
+    res = client.post(
+        "/api/v1/browser/capture",
+        data={"attempt_id": attempt_id},
+        files={"selected_image": ("sel.jpg", jpeg, "image/jpeg")},
+        headers=_browser_headers(cookies["lp_session"], cookies["lp_csrf"]),
+    )
+    assert res.status_code == 200, res.text
+
+
+def _session_ready(client: TestClient, cookies: dict[str, str]) -> bool:
+    state = client.get(
+        "/api/v1/browser/session", headers={"Cookie": f"lp_session={cookies['lp_session']}"}
+    ).json()
+    return bool(state.get("submission_ready"))
+
+
+def test_hardening_stale_authorization_invalidated_on_new_capture(tmp_path) -> None:
+    app = _make_app(tmp_path, vlm_provider="mock", vlm_mock_behavior="live")
+    with TestClient(app) as client:
+        cookies = _active_cookies(client)
+        bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+        # Attempt 1 -> LIVE -> PASS -> portrait A.
+        _capture(client, cookies, "a1", _jpeg_bytes())
+        assert (
+            client.post("/api/v1/browser/liveness", headers=bh).json()["portrait_allowed"] is True
+        )
+        assert client.post("/api/v1/browser/portrait", headers=bh).status_code == 200
+        assert _session_ready(client, cookies) is True
+
+        # Attempt 2 / new capture -> previous PASS + portrait must be invalidated immediately.
+        _capture(client, cookies, "a2", _jpeg_bytes(64, 64))
+        store: TransactionFileStore = app.state.transaction_store
+        internal = _internal_tx_id(client, None)
+        from app.transactions.decisions import read_decision
+
+        assert read_decision(store, internal) is None  # PASS removed
+        assert (
+            store.artifact_exists(internal, "portrait/processed.jpg") is False
+        )  # portrait removed
+        assert _session_ready(client, cookies) is False
+        assert client.post("/api/v1/browser/portrait", headers=bh).status_code == 412
+        assert client.post("/api/v1/browser/submit", headers=bh).status_code == 412
+        # GET /browser/portrait must not return the old portrait A.
+        assert client.get("/api/v1/browser/portrait", headers=bh).status_code == 404
+
+
+def test_hardening_new_pass_cannot_reuse_old_portrait(tmp_path) -> None:
+    app = _make_app(tmp_path, vlm_provider="mock", vlm_mock_behavior="live")
+    with TestClient(app) as client:
+        cookies = _active_cookies(client)
+        bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+        # attempt 1 LIVE -> portrait A.
+        _capture(client, cookies, "a1", _jpeg_bytes())
+        assert (
+            client.post("/api/v1/browser/liveness", headers=bh).json()["portrait_allowed"] is True
+        )
+        assert client.post("/api/v1/browser/portrait", headers=bh).status_code == 200
+
+        # attempt 2 -> new capture + LIVE -> new PASS (bound to B), but portrait B not yet made.
+        _capture(client, cookies, "a2", _jpeg_bytes(64, 64))
+        assert (
+            client.post("/api/v1/browser/liveness", headers=bh).json()["portrait_allowed"] is True
+        )
+        # Before portrait B: submit NOT_READY; old portrait A not exposed.
+        assert client.post("/api/v1/browser/submit", headers=bh).status_code == 412
+        assert client.get("/api/v1/browser/portrait", headers=bh).status_code == 404
+        # Generate portrait B -> submit succeeds.
+        assert client.post("/api/v1/browser/portrait", headers=bh).status_code == 200
+        assert _session_ready(client, cookies) is True
+
+
+def test_hardening_stale_in_flight_result_not_promoted(tmp_path) -> None:
+    import threading as _th
+
+    from app.experiments.vlm import VlmEvaluationService
+
+    original = VlmEvaluationService.evaluate
+    provider_started = _th.Event()
+    release_provider = _th.Event()
+    calls: list[int] = []
+
+    async def delayed_evaluate(self, request):
+        calls.append(1)
+        provider_started.set()
+        release_provider.wait(timeout=15)
+        return await original(self, request)
+
+    app = _make_app(tmp_path, vlm_provider="mock", vlm_mock_behavior="live")
+    VlmEvaluationService.evaluate = delayed_evaluate  # type: ignore[method-assign]
+    try:
+        cookies_holder: dict[str, str] = {}
+        result_holder: dict[str, int] = {}
+
+        def attempt1_liveness() -> None:
+            with TestClient(app) as c:
+                cookies = _active_cookies(c)
+                cookies_holder.update(cookies)
+                bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+                _capture(c, cookies, "a1", _jpeg_bytes())
+                result_holder["status"] = c.post("/api/v1/browser/liveness", headers=bh).status_code
+
+        t1 = _th.Thread(target=attempt1_liveness)
+        t1.start()
+        assert provider_started.wait(timeout=10)
+
+        # While attempt-1's provider call is in flight, upload attempt 2 in the SAME transaction.
+        internal: str
+        with TestClient(app) as c2:
+            cookies2 = dict(cookies_holder)  # reuse the same session/transaction
+            assert cookies2
+            _capture(c2, cookies2, "a2", _jpeg_bytes(64, 64))
+            internal = _internal_tx_id(c2, None)
+            from app.transactions.decisions import read_decision
+
+            assert read_decision(c2.app.state.transaction_store, internal) is None
+
+        # Let the attempt-1 provider return LIVE.
+        release_provider.set()
+        t1.join(timeout=15)
+        assert result_holder.get("status") in (409, 502)  # stale/conflict, never promoted
+
+        with TestClient(app) as c3:
+            store: TransactionFileStore = app.state.transaction_store
+            from app.transactions.decisions import read_decision
+
+            assert read_decision(store, internal) is None  # attempt-1 result was NOT promoted
+            # Attempt-2 portrait remains blocked (no current PASS).
+            bh2 = _browser_headers(cookies2["lp_session"], cookies2["lp_csrf"])
+            assert c3.post("/api/v1/browser/portrait", headers=bh2).status_code == 412
+        assert len(calls) == 1
+    finally:
+        VlmEvaluationService.evaluate = original  # type: ignore[method-assign]
+
+
+def test_hardening_concurrent_liveness_single_provider_call(tmp_path) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    from app.experiments.vlm import VlmEvaluationService
+
+    original = VlmEvaluationService.evaluate
+    calls: list[int] = []
+
+    async def slow_evaluate(self, request):
+        calls.append(1)
+        await asyncio.sleep(0.3)
+        return await original(self, request)
+
+    VlmEvaluationService.evaluate = slow_evaluate  # type: ignore[method-assign]
+    try:
+        app = _make_app(tmp_path, vlm_provider="mock", vlm_mock_behavior="live")
+        with TestClient(app) as client:
+            cookies = _active_cookies(client)
+            _capture(client, cookies, "c1", _jpeg_bytes())
+            session_cookie = cookies["lp_session"]
+            csrf = cookies["lp_csrf"]
+
+            def call() -> int:
+                with TestClient(app) as c:
+                    return c.post(
+                        "/api/v1/browser/liveness",
+                        headers=_browser_headers(session_cookie, csrf),
+                    ).status_code
+
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                statuses = list(pool.map(lambda _: call(), range(2)))
+            assert sorted(statuses) == [200, 202]  # one completed, one observed in-progress
+        assert len(calls) == 1  # exactly one provider call
+    finally:
+        VlmEvaluationService.evaluate = original  # type: ignore[method-assign]
+
+
+def test_hardening_client_cannot_manipulate_identity(tmp_path) -> None:
+    from app.experiments.vlm import VlmEvaluationService
+
+    original = VlmEvaluationService.evaluate
+    calls: list[int] = []
+
+    async def counting(self, request):
+        calls.append(1)
+        return await original(self, request)
+
+    VlmEvaluationService.evaluate = counting  # type: ignore[method-assign]
+    try:
+        app = _make_app(tmp_path, vlm_provider="mock", vlm_mock_behavior="live")
+        with TestClient(app) as client:
+            cookies = _active_cookies(client)
+            _capture(client, cookies, "real-1", _jpeg_bytes())
+            bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+            # The endpoint ignores any client-supplied attempt_id; identity is server-derived.
+            r1 = client.post("/api/v1/browser/liveness", data={"attempt_id": "fake-x"}, headers=bh)
+            assert r1.status_code == 200
+            r2 = client.post("/api/v1/browser/liveness", data={"attempt_id": "fake-y"}, headers=bh)
+            assert r2.status_code == 200
+            assert r1.json() == r2.json()
+        assert len(calls) == 1  # fake attempt ids cannot trigger extra evaluations
+    finally:
+        VlmEvaluationService.evaluate = original  # type: ignore[method-assign]
+
+
+def test_hardening_provider_error_cached_single_call(tmp_path) -> None:
+    from app.experiments.vlm import VlmEvaluationService
+
+    original = VlmEvaluationService.evaluate
+    calls: list[int] = []
+
+    async def failing_once(self, request):
+        calls.append(1)
+        from app.providers.vision import VlmError, VlmErrorCode
+
+        raise VlmError(VlmErrorCode.PROVIDER_TIMEOUT, "boom")
+
+    VlmEvaluationService.evaluate = failing_once  # type: ignore[method-assign]
+    try:
+        app = _make_app(tmp_path, vlm_provider="mock", vlm_mock_behavior="live")
+        with TestClient(app) as client:
+            cookies = _active_cookies(client)
+            _capture(client, cookies, "e1", _jpeg_bytes())
+            bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+            first = client.post("/api/v1/browser/liveness", headers=bh)
+            assert first.status_code in (502, 503)
+            second = client.post("/api/v1/browser/liveness", headers=bh)
+            assert second.status_code in (502, 503)  # cached fail-closed; provider NOT called again
+            assert client.post("/api/v1/browser/portrait", headers=bh).status_code == 412
+        assert len(calls) == 1  # the repeat did not consume another provider request
+    finally:
+        VlmEvaluationService.evaluate = original  # type: ignore[method-assign]
+
+
+def test_hardening_old_image_decision_not_current_after_new_capture(tmp_path) -> None:
+    app = _make_app(tmp_path, vlm_provider="mock", vlm_mock_behavior="live")
+    with TestClient(app) as client:
+        cookies = _active_cookies(client)
+        bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+        _capture(client, cookies, "a1", _jpeg_bytes())
+        assert (
+            client.post("/api/v1/browser/liveness", headers=bh).json()["portrait_allowed"] is True
+        )
+        store: TransactionFileStore = app.state.transaction_store
+        internal = _internal_tx_id(client, None)
+        from app.transactions.decisions import read_decision
+
+        old_decision = read_decision(store, internal)
+        assert old_decision is not None and old_decision.outcome.value == "PASS"
+
+        # New capture invalidates the old decision.
+        _capture(client, cookies, "a2", _jpeg_bytes(64, 64))
+        assert liveness.has_current_canonical_pass(store, internal) is False
+        # A stale decision bound to the OLD image SHA must NOT satisfy the current check.
+        _bound_pass_decision(app, internal, "a1", old_decision.metadata["selected_sha256"])
+        assert liveness.has_current_canonical_pass(store, internal) is False
+
+
+# ------------------------------------------------------- stale-portrait race tests
+
+
+def test_portrait_race_new_capture_supersedes_inflight(tmp_path) -> None:
+    """A stale in-flight portrait must never be authorized for a newer capture or overwrite it."""
+    import threading as _th
+
+    from app.portrait import PortraitProcessor
+
+    received: dict[str, Any] = {}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            received["body"] = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"redirect_url": "http://localhost:3001/complete"}')
+
+        def log_message(self, *args: Any) -> None:
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    original = PortraitProcessor.process
+    portrait_started = _th.Event()
+    release_portrait = _th.Event()
+    portrait_calls: list[int] = []
+
+    async def delayed_process(
+        self, source, transaction_id, *, face_box_normalized=None, output_relative_path=None
+    ):
+        portrait_calls.append(1)
+        if len(portrait_calls) == 1:  # only A's portrait is delayed
+            portrait_started.set()
+            release_portrait.wait(timeout=15)
+        return await original(
+            self,
+            source,
+            transaction_id,
+            face_box_normalized=face_box_normalized,
+            output_relative_path=output_relative_path,
+        )
+
+    PortraitProcessor.process = delayed_process  # type: ignore[method-assign]
+    try:
+        profile = dict(
+            D365,
+            **{
+                "callback": {
+                    "url": f"http://127.0.0.1:{port}/cb",
+                    "auth_type": "none",
+                    "secret_env": "",
+                }
+            },
+        )
+        app = _make_app(
+            tmp_path, consumers=[profile], vlm_provider="mock", vlm_mock_behavior="live"
+        )
+        cookies_holder: dict[str, str] = {}
+        portrait_a_status: dict[str, int] = {}
+
+        def attempt_a_portrait() -> None:
+            with TestClient(app) as c:
+                cookies = _active_cookies(c)
+                cookies_holder.update(cookies)
+                bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+                _capture(c, cookies, "a1", _jpeg_bytes())
+                assert c.post("/api/v1/browser/liveness", headers=bh).json()["portrait_allowed"]
+                portrait_a_status["status"] = c.post(
+                    "/api/v1/browser/portrait", headers=bh
+                ).status_code
+
+        t1 = _th.Thread(target=attempt_a_portrait)
+        t1.start()
+        assert portrait_started.wait(timeout=10)
+
+        # While A's portrait is processing, upload B and fully promote B's portrait.
+        with TestClient(app) as c2:
+            cookies2 = dict(cookies_holder)
+            _capture(c2, cookies2, "a2", _jpeg_bytes(64, 64))
+            bh2 = _browser_headers(cookies2["lp_session"], cookies2["lp_csrf"])
+            assert c2.post("/api/v1/browser/liveness", headers=bh2).json()["portrait_allowed"]
+            assert c2.post("/api/v1/browser/portrait", headers=bh2).status_code == 200
+            internal = _internal_tx_id(c2, None)
+            store = c2.app.state.transaction_store
+            from app.transactions.decisions import read_decision
+
+            b_decision = read_decision(store, internal)
+            auth = store.read_json(internal, "portrait/authorization.json")
+            assert auth["attempt_id"] == "a2"
+            assert auth["decision_id"] == b_decision.decision_id
+            b_portrait = store.read_artifact(internal, "portrait/processed.jpg")
+
+        # Let A's portrait finish: it must be rejected as stale and must NOT overwrite B.
+        release_portrait.set()
+        t1.join(timeout=15)
+        assert portrait_a_status.get("status") == 409  # STALE_PORTRAIT
+
+        with TestClient(app) as c3:
+            cookies3 = dict(cookies_holder)
+            internal = _internal_tx_id(c3, None)
+            store = c3.app.state.transaction_store
+            auth = store.read_json(internal, "portrait/authorization.json")
+            assert auth["attempt_id"] == "a2"  # still references B
+            assert store.read_artifact(internal, "portrait/processed.jpg") == b_portrait  # B intact
+            # A's candidate must have been discarded.
+            stale_candidates = list(store.transaction_dir(internal).glob("portrait/candidates/*"))
+            if stale_candidates:
+                raise AssertionError(f"stale candidate left behind: {stale_candidates}")
+            bh3 = _browser_headers(cookies3["lp_session"], cookies3["lp_csrf"])
+            assert c3.get("/api/v1/browser/portrait", headers=bh3).status_code == 200
+            # Submit sends B's portrait (callback Base64 decodes to B's processed bytes).
+            submit = c3.post("/api/v1/browser/submit", headers=bh3)
+            assert submit.status_code == 200, submit.text
+            payload = json.loads(received["body"])
+            decoded = base64.b64decode(payload["processed_jpeg_base64"])
+            assert decoded == b_portrait
+            assert (
+                c3.get(
+                    "/api/v1/integration/transactions/ext-123/status?source=D365",
+                    headers=_dev_headers(),
+                ).json()["status"]
+                == "COMPLETED"
+            )
+    finally:
+        PortraitProcessor.process = original  # type: ignore[method-assign]
+        server.shutdown()
+
+
+def test_portrait_race_stale_finishes_before_new_pass(tmp_path) -> None:
+    """A portrait finishing after a new capture (before any new PASS) leaves no authorization."""
+    import threading as _th
+
+    from app.portrait import PortraitProcessor
+
+    original = PortraitProcessor.process
+    portrait_started = _th.Event()
+    release_portrait = _th.Event()
+    portrait_calls: list[int] = []
+
+    async def delayed_process(
+        self, source, transaction_id, *, face_box_normalized=None, output_relative_path=None
+    ):
+        portrait_calls.append(1)
+        if len(portrait_calls) == 1:
+            portrait_started.set()
+            release_portrait.wait(timeout=15)
+        return await original(
+            self,
+            source,
+            transaction_id,
+            face_box_normalized=face_box_normalized,
+            output_relative_path=output_relative_path,
+        )
+
+    PortraitProcessor.process = delayed_process  # type: ignore[method-assign]
+    try:
+        app = _make_app(tmp_path, vlm_provider="mock", vlm_mock_behavior="live")
+        cookies_holder: dict[str, str] = {}
+        portrait_a_status: dict[str, int] = {}
+
+        def attempt_a_portrait() -> None:
+            with TestClient(app) as c:
+                cookies = _active_cookies(c)
+                cookies_holder.update(cookies)
+                bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+                _capture(c, cookies, "a1", _jpeg_bytes())
+                assert c.post("/api/v1/browser/liveness", headers=bh).json()["portrait_allowed"]
+                portrait_a_status["status"] = c.post(
+                    "/api/v1/browser/portrait", headers=bh
+                ).status_code
+
+        t1 = _th.Thread(target=attempt_a_portrait)
+        t1.start()
+        assert portrait_started.wait(timeout=10)
+
+        # Upload B (invalidates A's PASS/portrait) but do NOT run liveness for B yet.
+        with TestClient(app) as c2:
+            cookies2 = dict(cookies_holder)
+            _capture(c2, cookies2, "a2", _jpeg_bytes(64, 64))
+            internal = _internal_tx_id(c2, None)
+            assert (
+                c2.app.state.transaction_store.artifact_exists(
+                    internal, "portrait/authorization.json"
+                )
+                is False
+            )
+
+        # A finishes -> stale -> no portrait authorization.
+        release_portrait.set()
+        t1.join(timeout=15)
+        assert portrait_a_status.get("status") == 409
+
+        with TestClient(app) as c3:
+            cookies3 = dict(cookies_holder)
+            store = c3.app.state.transaction_store
+            assert store.artifact_exists(internal, "portrait/authorization.json") is False
+            assert store.artifact_exists(internal, "portrait/processed.jpg") is False
+            bh3 = _browser_headers(cookies3["lp_session"], cookies3["lp_csrf"])
+            assert c3.get("/api/v1/browser/portrait", headers=bh3).status_code == 404
+            assert c3.post("/api/v1/browser/submit", headers=bh3).status_code == 412
+    finally:
+        PortraitProcessor.process = original  # type: ignore[method-assign]
+
+
+# ------------------------------------------------------- claim recovery / single-flight tests
+
+
+def _write_claim(app, tx: str, identity: str, prefix: str, started_at_iso: str) -> None:
+    store: TransactionFileStore = app.state.transaction_store
+    store.write_json(
+        tx,
+        liveness.claim_path_for(identity, prefix),
+        {"identity": identity, "status": "IN_PROGRESS", "started_at": started_at_iso},
+    )
+
+
+def _current_identity(app, internal: str) -> str:
+    store: TransactionFileStore = app.state.transaction_store
+    key = liveness.current_capture_key(store, internal)
+    assert key is not None
+    return liveness.liveness_identity(key["attempt_id"], key["selected_sha256"])
+
+
+def test_portrait_stale_does_not_mutate_newer_status(tmp_path) -> None:
+    import threading as _th
+
+    from app.portrait import PortraitProcessor
+
+    original = PortraitProcessor.process
+    started = _th.Event()
+    release = _th.Event()
+
+    async def delayed(
+        self, source, transaction_id, *, face_box_normalized=None, output_relative_path=None
+    ):
+        started.set()
+        release.wait(timeout=15)
+        return await original(
+            self,
+            source,
+            transaction_id,
+            face_box_normalized=face_box_normalized,
+            output_relative_path=output_relative_path,
+        )
+
+    PortraitProcessor.process = delayed  # type: ignore[method-assign]
+    try:
+        app = _make_app(tmp_path, vlm_provider="mock", vlm_mock_behavior="live")
+        cookies_holder: dict[str, str] = {}
+        status_holder: dict[str, int] = {}
+
+        def a_portrait() -> None:
+            with TestClient(app) as c:
+                cookies = _active_cookies(c)
+                cookies_holder.update(cookies)
+                bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+                _capture(c, cookies, "a1", _jpeg_bytes())
+                assert c.post("/api/v1/browser/liveness", headers=bh).json()["portrait_allowed"]
+                status_holder["status"] = c.post("/api/v1/browser/portrait", headers=bh).status_code
+
+        t1 = _th.Thread(target=a_portrait)
+        t1.start()
+        assert started.wait(timeout=10)
+
+        with TestClient(app) as c2:
+            cookies2 = dict(cookies_holder)
+            _capture(c2, cookies2, "a2", _jpeg_bytes(64, 64))
+            bh2 = _browser_headers(cookies2["lp_session"], cookies2["lp_csrf"])
+            assert c2.post("/api/v1/browser/liveness", headers=bh2).json()["portrait_allowed"]
+            internal = _internal_tx_id(c2, None)
+            before = c2.app.state.transaction_store.read_transaction_json(internal)["status"]
+            assert before == "DECISION_READY"  # B has a PASS, no portrait yet
+
+        release.set()
+        t1.join(timeout=15)
+        assert status_holder.get("status") == 409  # stale
+
+        with TestClient(app) as c3:
+            store = c3.app.state.transaction_store
+            internal = _internal_tx_id(c3, None)
+            # Stale A completion MUST NOT have mutated B's transaction state.
+            after = store.read_transaction_json(internal)["status"]
+            assert after == before
+    finally:
+        PortraitProcessor.process = original  # type: ignore[method-assign]
+
+
+def test_portrait_concurrent_single_execution(tmp_path) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    from app.portrait import PortraitProcessor
+
+    original = PortraitProcessor.process
+    calls: list[int] = []
+
+    async def slow(
+        self, source, transaction_id, *, face_box_normalized=None, output_relative_path=None
+    ):
+        calls.append(1)
+        await asyncio.sleep(0.3)
+        return await original(
+            self,
+            source,
+            transaction_id,
+            face_box_normalized=face_box_normalized,
+            output_relative_path=output_relative_path,
+        )
+
+    PortraitProcessor.process = slow  # type: ignore[method-assign]
+    try:
+        app = _make_app(tmp_path, vlm_provider="mock", vlm_mock_behavior="live")
+        with TestClient(app) as client:
+            cookies = _active_cookies(client)
+            bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+            _capture(client, cookies, "p1", _jpeg_bytes())
+            assert client.post("/api/v1/browser/liveness", headers=bh).json()["portrait_allowed"]
+            session_cookie = cookies["lp_session"]
+            csrf = cookies["lp_csrf"]
+
+            def call() -> int:
+                with TestClient(app) as c:
+                    return c.post(
+                        "/api/v1/browser/portrait", headers=_browser_headers(session_cookie, csrf)
+                    ).status_code
+
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                statuses = list(pool.map(lambda _: call(), range(2)))
+            assert all(s in (200, 202) for s in statuses)
+        assert len(calls) == 1  # exactly one PortraitProcessor execution
+    finally:
+        PortraitProcessor.process = original  # type: ignore[method-assign]
+
+
+def test_portrait_stale_claim_recovers(tmp_path) -> None:
+    from app.portrait import PortraitProcessor
+
+    original = PortraitProcessor.process
+    calls: list[int] = []
+
+    async def counting(
+        self, source, transaction_id, *, face_box_normalized=None, output_relative_path=None
+    ):
+        calls.append(1)
+        return await original(
+            self,
+            source,
+            transaction_id,
+            face_box_normalized=face_box_normalized,
+            output_relative_path=output_relative_path,
+        )
+
+    PortraitProcessor.process = counting  # type: ignore[method-assign]
+    try:
+        app = _make_app(tmp_path, vlm_provider="mock", vlm_mock_behavior="live")
+        with TestClient(app) as client:
+            cookies = _active_cookies(client)
+            bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+            _capture(client, cookies, "r1", _jpeg_bytes())
+            assert client.post("/api/v1/browser/liveness", headers=bh).json()["portrait_allowed"]
+            internal = _internal_tx_id(client, None)
+            identity = _current_identity(app, internal)
+            # Backdate a stale portrait claim: it must be recovered and the portrait processed.
+            stale = (
+                datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=1000)
+            ).isoformat()
+            _write_claim(app, internal, identity, liveness.PORTRAIT_CLAIM_PREFIX, stale)
+            res = client.post("/api/v1/browser/portrait", headers=bh)
+            assert res.status_code == 200, res.text
+            assert client.get("/api/v1/browser/portrait", headers=bh).status_code == 200
+        assert len(calls) == 1
+    finally:
+        PortraitProcessor.process = original  # type: ignore[method-assign]
+
+
+def test_liveness_stale_claim_recovers(tmp_path) -> None:
+    from app.experiments.vlm import VlmEvaluationService
+
+    original = VlmEvaluationService.evaluate
+    calls: list[int] = []
+
+    async def counting(self, request):
+        calls.append(1)
+        return await original(self, request)
+
+    VlmEvaluationService.evaluate = counting  # type: ignore[method-assign]
+    try:
+        app = _make_app(tmp_path, vlm_provider="mock", vlm_mock_behavior="live")
+        with TestClient(app) as client:
+            cookies = _active_cookies(client)
+            bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+            _capture(client, cookies, "r2", _jpeg_bytes())
+            internal = _internal_tx_id(client, None)
+            identity = _current_identity(app, internal)
+            stale = (
+                datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=1000)
+            ).isoformat()
+            _write_claim(app, internal, identity, liveness.EVALUATION_CLAIM_PREFIX, stale)
+            res = client.post("/api/v1/browser/liveness", headers=bh)
+            assert res.status_code == 200, res.text
+            assert res.json()["portrait_allowed"] is True
+        assert len(calls) == 1
+    finally:
+        VlmEvaluationService.evaluate = original  # type: ignore[method-assign]
+
+
+def test_active_claims_do_not_duplicate_work(tmp_path) -> None:
+    from app.experiments.vlm import VlmEvaluationService
+    from app.portrait import PortraitProcessor
+
+    eval_original = VlmEvaluationService.evaluate
+    portrait_original = PortraitProcessor.process
+    eval_calls: list[int] = []
+    portrait_calls: list[int] = []
+
+    async def count_eval(self, request):
+        eval_calls.append(1)
+        return await eval_original(self, request)
+
+    async def count_portrait(
+        self, source, transaction_id, *, face_box_normalized=None, output_relative_path=None
+    ):
+        portrait_calls.append(1)
+        return await portrait_original(
+            self,
+            source,
+            transaction_id,
+            face_box_normalized=face_box_normalized,
+            output_relative_path=output_relative_path,
+        )
+
+    VlmEvaluationService.evaluate = count_eval  # type: ignore[method-assign]
+    PortraitProcessor.process = count_portrait  # type: ignore[method-assign]
+    try:
+        app = _make_app(tmp_path, vlm_provider="mock", vlm_mock_behavior="live")
+        with TestClient(app) as client:
+            cookies = _active_cookies(client)
+            bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+            _capture(client, cookies, "a3", _jpeg_bytes())
+            internal = _internal_tx_id(client, None)
+            identity = _current_identity(app, internal)
+            fresh = datetime.datetime.now(datetime.UTC).isoformat()
+            # Active (non-stale) claims must yield LIVENESS_IN_PROGRESS / PORTRAIT_IN_PROGRESS
+            # and never trigger duplicate provider/portrait work.
+            _write_claim(app, internal, identity, liveness.EVALUATION_CLAIM_PREFIX, fresh)
+            res = client.post("/api/v1/browser/liveness", headers=bh)
+            assert res.status_code == 202
+            assert res.json()["error"]["code"] == "LIVENESS_IN_PROGRESS"
+
+            # Clean the eval claim, run liveness, then plant an active portrait claim.
+            store: TransactionFileStore = app.state.transaction_store
+            store.remove_artifact(
+                internal, liveness.claim_path_for(identity, liveness.EVALUATION_CLAIM_PREFIX)
+            )
+            assert client.post("/api/v1/browser/liveness", headers=bh).status_code == 200
+            _write_claim(app, internal, identity, liveness.PORTRAIT_CLAIM_PREFIX, fresh)
+            res = client.post("/api/v1/browser/portrait", headers=bh)
+            assert res.status_code == 202
+            assert res.json()["error"]["code"] == "PORTRAIT_IN_PROGRESS"
+        assert len(eval_calls) == 1
+        assert len(portrait_calls) == 0  # the active portrait claim blocked processing
+    finally:
+        VlmEvaluationService.evaluate = eval_original  # type: ignore[method-assign]
+        PortraitProcessor.process = portrait_original  # type: ignore[method-assign]

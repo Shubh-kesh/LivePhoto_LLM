@@ -263,8 +263,28 @@ class TransactionFileStore:
         except OSError as exc:
             raise TransactionStorageError(f"cannot read artifact: {exc}") from exc
 
+    def write_bytes(self, transaction_id: str, relative_path: str, data: bytes) -> None:
+        """Atomically write bytes at a transaction-relative path (root-confined).
+
+        Used for staging artifacts (e.g. portrait candidates) before they are promoted to a
+        canonical artifact path.
+        """
+        if len(data) > MAX_ARTIFACT_BYTES:
+            raise TransactionStorageError("artifact exceeds the size limit")
+        target = self.resolve_artifact(transaction_id, relative_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        self._write_atomic(target, data)
+
     def artifact_exists(self, transaction_id: str, relative_path: str) -> bool:
         return self.resolve_artifact(transaction_id, relative_path).is_file()
+
+    def remove_artifact(self, transaction_id: str, relative_path: str) -> None:
+        """Best-effort removal of a transaction-relative artifact (root-confined)."""
+        target = self.resolve_artifact(transaction_id, relative_path)
+        try:
+            target.unlink(missing_ok=True)
+        except OSError as exc:
+            raise TransactionStorageError(f"cannot remove artifact: {exc}") from exc
 
     # ------------------------------------------------------------------ JSON
 

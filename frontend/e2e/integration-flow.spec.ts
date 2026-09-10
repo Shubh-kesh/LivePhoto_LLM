@@ -1,9 +1,9 @@
 /**
- * M5.8.1 integrated E2E: the /xbiz/live_photo route uses the SAME real capture pipeline as /capture
- * (fake camera + stub face/eye + fake portrait segmentation + test-only PASS writer + stub
- * consumer). Verifies: launch -> clean URL -> permission -> burst capture -> quality eligible ->
- * Review -> VLM panel visible and stable -> Use photo (selected frame upload) -> portrait -> Submit
- * -> callback -> redirect; attempt_count stays 1 (at-most-once).
+ * Pre-M6 UX integrated E2E: the /xbiz/live_photo route uses the real capture pipeline and, on
+ * quality-eligible, AUTOMATICALLY uploads the selected frame and prepares the processed portrait.
+ * The customer reviews the PROCESSED PORTRAIT (Retry / Submit photo). No raw Review ("Use photo"),
+ * no "Prepare portrait" button, and no VLM diagnostics on the customer flow. Submit -> callback ->
+ * redirect. attempt_count stays 1 (at-most-once).
  */
 
 import { expect, test } from '@playwright/test'
@@ -30,7 +30,7 @@ async function launch(client: import('@playwright/test').APIRequestContext): Pro
   return { url: (await res.json()).launch_url, externalId }
 }
 
-test('integrated happy path: shared burst/quality pipeline -> VLM panel -> submit -> redirect', async ({
+test('integrated journey: capture -> auto upload -> auto portrait -> processed-portrait review -> submit -> redirect', async ({
   page,
   request,
 }) => {
@@ -42,7 +42,6 @@ test('integrated happy path: shared burst/quality pipeline -> VLM panel -> submi
   const { url, externalId } = await launch(request)
   await page.goto(url)
 
-  // Redemption 302s to the clean URL; the token disappears from the address bar.
   await expect(page).toHaveURL(/\/xbiz\/live_photo\/?$/)
 
   // Shared pipeline: permission stage (explicit Open camera action).
@@ -53,25 +52,20 @@ test('integrated happy path: shared burst/quality pipeline -> VLM panel -> submi
   })
   await page.getByRole('button', { name: 'Capture photo' }).click()
 
-  // Quality eligible -> Review with the real selected frame.
-  await expect(page.getByRole('button', { name: 'Use photo' })).toBeVisible({ timeout: 20_000 })
-
-  // VLM panel is visible on the integrated Review and stays mounted.
-  const panel = page.getByTestId('vlm-experiment')
-  await expect(panel).toBeVisible({ timeout: 20_000 })
-  await page.waitForTimeout(500)
-  await expect(panel).toBeVisible()
-
-  // Use photo -> uploads the selected frame (same attempt_id; count stays 1).
-  await page.getByRole('button', { name: 'Use photo' }).click()
-  await expect(page.getByRole('button', { name: 'Prepare portrait' })).toBeVisible({
-    timeout: 20_000,
+  // Automatic flow: upload + portrait. The processed-portrait review appears directly.
+  await expect(page.getByRole('button', { name: 'Submit photo' })).toBeVisible({
+    timeout: 60_000,
   })
-  await page.getByRole('button', { name: 'Prepare portrait' }).click()
-  await expect(page.getByRole('button', { name: 'Submit photo' })).toBeVisible({ timeout: 60_000 })
-  await page.getByRole('button', { name: 'Submit photo' }).click()
+  await expect(page.getByRole('heading', { name: 'Your photo' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible()
 
-  // Successful submit -> consumer redirect.
+  // No raw Review, no Prepare portrait, no VLM diagnostics on the customer flow.
+  await expect(page.getByRole('button', { name: 'Use photo' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Prepare portrait' })).toHaveCount(0)
+  await expect(page.getByTestId('vlm-experiment')).toHaveCount(0)
+
+  // Submit -> consumer redirect.
+  await page.getByRole('button', { name: 'Submit photo' }).click()
   await expect(page).toHaveURL(/localhost:3001\/complete/, { timeout: 30_000 })
 
   // At-most-once counting and completion via the status API.

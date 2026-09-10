@@ -4,4 +4,120 @@ cloudflared tunnel --url http://localhost:8000
 
 npm run dev -- --host 0.0.0.0 --force
 
+
+node e2e/stub-consumer.mjs
+
 cloudflared tunnel --url http://localhost:5173
+
+curl -X POST "http://localhost:8000/api/v1/integration/launch-sessions" \
+  -H "X-LivePhoto-Dev-Auth: 1234asdfg" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "transaction_id": "test-pre-m6-001",
+    "source": "D365",
+    "ocr_required": false,
+    "camera_config": "1",
+    "white_background": true,
+    "output_file_format": "jpeg"
+  }'
+
+  cd /Users/Shubhansh/Developer/LivePhoto/backend
+
+uv run python - <<'PY'
+import traceback
+import numpy as np
+from pathlib import Path
+from PIL import Image
+
+from app.core.config import Settings
+from app.portrait.segmentation import OnnxPortraitSegmentation
+from app.portrait.matte import refine_matte
+from app.portrait.crop import passport_crop
+from app.portrait.background import composite_solid, parse_background_color
+
+TX = "0a46935e355d4225b68eabbb2307f2eb"
+P = Path(
+    f"local-data/file-storage/transactions/{TX}/capture/selected-original.jpg"
+)
+
+s = Settings()
+
+print("=== 1. DECODE ===")
+try:
+    image = Image.open(P)
+    image.load()
+    image = image.convert("RGB")
+    print("OK:", image.size, image.mode)
+except Exception:
+    traceback.print_exc()
+    raise SystemExit
+
+print("\n=== 2. MODEL LOAD ===")
+try:
+    provider = OnnxPortraitSegmentation(
+        s.portrait_model_path,
+        expected_sha256=s.portrait_model_sha256,
+    )
+    print("OK:", provider.info)
+except Exception:
+    traceback.print_exc()
+    raise SystemExit
+
+print("\n=== 3. SEGMENTATION ===")
+try:
+    alpha = provider.predict_alpha(image)
+    print(
+        "OK:",
+        "shape =", alpha.shape,
+        "min =", float(np.min(alpha)),
+        "max =", float(np.max(alpha)),
+        "mean =", float(np.mean(alpha)),
+    )
+except Exception:
+    traceback.print_exc()
+    raise SystemExit
+
+print("\n=== 4. MATTE REFINEMENT ===")
+try:
+    refined = refine_matte(alpha)
+    print(
+        "OK:",
+        "shape =", refined.shape,
+        "min =", float(np.min(refined)),
+        "max =", float(np.max(refined)),
+        "mean =", float(np.mean(refined)),
+    )
+except Exception:
+    traceback.print_exc()
+    raise SystemExit
+
+print("\n=== 5. PASSPORT CROP ===")
+try:
+    crop = passport_crop(refined, (image.width, image.height))
+    print("OK:", crop)
+except Exception:
+    traceback.print_exc()
+    raise SystemExit
+
+print("\n=== 6. COMPOSITE ===")
+try:
+    background = parse_background_color(s.portrait_background_color)
+
+    cropped = image.crop((crop.x0, crop.y0, crop.x1, crop.y1))
+    cropped_alpha = refined[crop.y0:crop.y1, crop.x0:crop.x1]
+
+    foreground = np.asarray(cropped.convert("RGB"))
+    composed = composite_solid(foreground, cropped_alpha, background)
+
+    print(
+        "OK:",
+        "foreground =", foreground.shape,
+        "alpha =", cropped_alpha.shape,
+        "output =", composed.shape,
+    )
+except Exception:
+    traceback.print_exc()
+    raise SystemExit
+
+print("\nALL PORTRAIT STAGES PASSED")
+PY

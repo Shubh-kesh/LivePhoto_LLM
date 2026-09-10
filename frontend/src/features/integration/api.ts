@@ -58,6 +58,18 @@ export async function uploadCapture(
   return apiPostMultipart('/api/v1/browser/capture', form, 20_000)
 }
 
+/** Server-authoritative liveness of the stored capture (configured VLM_PROVIDER; never browser-chosen).
+ *  The evaluation identity is derived server-side from the stored capture; no attempt_id is sent. */
+export async function browserLiveness(): Promise<{
+  classification: string | null
+  outcome: string
+  portrait_allowed: boolean
+}> {
+  const form = new FormData()
+  const data: unknown = await apiPostMultipart('/api/v1/browser/liveness', form, 60_000)
+  return data as { classification: string | null; outcome: string; portrait_allowed: boolean }
+}
+
 /** Trigger backend portrait processing (requires canonical PASS). */
 export async function triggerPortrait(): Promise<unknown> {
   const form = new FormData()

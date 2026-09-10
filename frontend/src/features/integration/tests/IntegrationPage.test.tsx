@@ -1,7 +1,7 @@
 /**
- * M5.8.1 IntegrationPage tests. CapturePage is mocked (jsdom must not instantiate MediaPipe
- * providers); the tests drive the integration seams (onAttempt/onUsePhoto) the shared flow exposes
- * and verify the wiring (attempt registration, selected-frame upload, portrait/terminal advance).
+ * Pre-M6 UX IntegrationPage tests. CapturePage is mocked (jsdom must not instantiate MediaPipe
+ * providers); the tests drive the integration seams the shared flow exposes: attempt registration
+ * and automatic upload + portrait preparation on quality-eligible (autoProcess).
  */
 
 import { render, screen, waitFor } from '@testing-library/react'
@@ -11,6 +11,7 @@ import { IntegrationPage } from '../IntegrationPage'
 
 const mockRegisterAttempt = vi.fn()
 const mockUploadCapture = vi.fn()
+const mockBrowserLiveness = vi.fn()
 const mockWriteTestDecision = vi.fn()
 const mockTriggerPortrait = vi.fn()
 const mockSubmitForConsumer = vi.fn()
@@ -24,6 +25,9 @@ vi.mock('../api', () => ({
   uploadCapture: (...args: unknown[]) => {
     return mockUploadCapture(...args)
   },
+  browserLiveness: (...args: unknown[]) => {
+    return mockBrowserLiveness(...args)
+  },
   writeTestDecision: () => {
     mockWriteTestDecision()
     return Promise.resolve({})
@@ -33,8 +37,7 @@ vi.mock('../api', () => ({
     return Promise.resolve({})
   },
   submitForConsumer: () => {
-    mockSubmitForConsumer()
-    return Promise.resolve('http://localhost:3001/complete')
+    return mockSubmitForConsumer()
   },
   allowlistedAttemptReason: (codes: string[]) => codes[0],
 }))
@@ -50,9 +53,7 @@ interface MockCaptureProps {
     disposition: 'QUALITY_RETRY' | 'QUALITY_ELIGIBLE'
     reasonCodes: string[]
   }) => void
-  onUsePhoto?: (flow: {
-    bundle: { frames: { id: string; blob: Blob }[]; representativeFrameId: string } | null
-  }) => void
+  autoProcess?: (flow: unknown) => void | Promise<void>
 }
 
 vi.mock('../../capture/CapturePage', () => ({
@@ -73,19 +74,7 @@ vi.mock('../../capture/CapturePage', () => ({
       <button
         type="button"
         onClick={() =>
-          props.onAttempt?.({
-            attemptId: 'att-1',
-            disposition: 'QUALITY_RETRY',
-            reasonCodes: ['EYES_CLOSED'],
-          })
-        }
-      >
-        attempt-retry
-      </button>
-      <button
-        type="button"
-        onClick={() =>
-          props.onUsePhoto?.({
+          props.autoProcess?.({
             bundle: {
               frames: [
                 { id: 'zero', blob: new Blob(['zero']) },
@@ -96,7 +85,7 @@ vi.mock('../../capture/CapturePage', () => ({
           })
         }
       >
-        use-photo
+        auto-process
       </button>
     </div>
   ),
@@ -111,9 +100,16 @@ describe('IntegrationPage', () => {
     mockedFetch.mockReset()
     mockRegisterAttempt.mockReset()
     mockUploadCapture.mockReset()
+    mockBrowserLiveness.mockReset()
     mockWriteTestDecision.mockReset()
     mockTriggerPortrait.mockReset()
     mockSubmitForConsumer.mockReset()
+    mockUploadCapture.mockResolvedValue({ attempt_count: 1, max_attempts: 10, terminal: false })
+    mockBrowserLiveness.mockResolvedValue({
+      classification: 'LIVE',
+      outcome: 'PASS',
+      portrait_allowed: true,
+    })
   })
 
   it('shows link-unavailable for invalid state', async () => {
@@ -152,45 +148,120 @@ describe('IntegrationPage', () => {
     await waitFor(() => expect(screen.getByText(/Attempt 1 of 10/)).toBeInTheDocument())
   })
 
-  it('registers QUALITY_RETRY with an allowlisted reason', async () => {
-    mockSession('active')
-    render(<IntegrationPage />)
-    await waitFor(() => expect(screen.getByTestId('mock-capture')).toBeInTheDocument())
-    screen.getByText('attempt-retry').click()
-    await waitFor(() =>
-      expect(mockRegisterAttempt).toHaveBeenCalledWith('att-1', 'QUALITY_RETRY', 'EYES_CLOSED'),
-    )
-  })
-
-  it('Use Photo uploads the SAME attempt id with the M3-selected representative frame blob, then advances to portrait', async () => {
+  it('quality-eligible auto-uploads the selected frame (same attempt id), prepares portrait, then shows processed-portrait review', async () => {
     mockSession('active')
     render(<IntegrationPage />)
     await waitFor(() => expect(screen.getByTestId('mock-capture')).toBeInTheDocument())
     screen.getByText('attempt-eligible').click()
-    screen.getByText('use-photo').click()
+    screen.getByText('auto-process').click()
+
+    // Automatic upload of the M3-selected (representative) frame with the SAME attempt_id.
     await waitFor(() => expect(mockUploadCapture).toHaveBeenCalledTimes(1))
     const [attemptId, blob] = mockUploadCapture.mock.calls[0] as [string, Blob]
-    expect(attemptId).toBe('att-1') // same attempt_id, no new count
-    // The uploaded blob must be the representative frame, NOT the first/arbitrary frame.
-    // ('rep' blob has size 3; the 'zero' first-frame blob has size 4.)
+    expect(attemptId).toBe('att-1')
+    // The uploaded blob is the representative frame ('rep' size 3), not the first frame ('zero' size 4).
     expect(blob.size).toBe(3)
-    await waitFor(() => expect(screen.getByText('Prepare portrait')).toBeInTheDocument())
+
+    // Server-authoritative liveness (LIVE) is what allows portrait — not the test-PASS writer.
+    await waitFor(() => expect(mockBrowserLiveness).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(mockTriggerPortrait).toHaveBeenCalledTimes(1))
+    expect(mockWriteTestDecision).not.toHaveBeenCalled()
+
+    // Processed-portrait review: title, Retry + Submit photo. No Use photo / Prepare portrait.
+    await waitFor(() => expect(screen.getByText('Submit photo')).toBeInTheDocument())
+    expect(screen.getByRole('heading', { name: 'Your photo' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+    expect(screen.queryByText('Use photo')).not.toBeInTheDocument()
+    expect(screen.queryByText('Prepare portrait')).not.toBeInTheDocument()
+    expect(screen.queryByText('VLM test')).not.toBeInTheDocument()
   })
 
-  it('Use Photo upload failure stays on Review and does not mint a new attempt', async () => {
+  it('does not duplicate upload/liveness/portrait operations for one eligible capture', async () => {
+    mockSession('active')
+    render(<IntegrationPage />)
+    await waitFor(() => expect(screen.getByTestId('mock-capture')).toBeInTheDocument())
+    screen.getByText('attempt-eligible').click()
+    screen.getByText('auto-process').click()
+    await waitFor(() => expect(screen.getByText('Submit photo')).toBeInTheDocument())
+    expect(mockUploadCapture).toHaveBeenCalledTimes(1)
+    expect(mockBrowserLiveness).toHaveBeenCalledTimes(1)
+    expect(mockTriggerPortrait).toHaveBeenCalledTimes(1)
+    expect(mockWriteTestDecision).not.toHaveBeenCalled()
+  })
+
+  it('non-LIVE liveness result blocks portrait and offers a safe Retry', async () => {
+    mockBrowserLiveness.mockResolvedValueOnce({
+      classification: 'SCREEN_REPLAY',
+      outcome: 'FAIL',
+      portrait_allowed: false,
+    })
+    mockSession('active')
+    render(<IntegrationPage />)
+    await waitFor(() => expect(screen.getByTestId('mock-capture')).toBeInTheDocument())
+    screen.getByText('attempt-eligible').click()
+    screen.getByText('auto-process').click()
+    await waitFor(() =>
+      expect(screen.getByText("We couldn't use this photo. Please try again.")).toBeInTheDocument(),
+    )
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+    expect(mockTriggerPortrait).not.toHaveBeenCalled()
+    expect(screen.queryByText('Submit photo')).not.toBeInTheDocument()
+  })
+
+  it('liveness provider failure blocks portrait with a safe retry', async () => {
+    mockBrowserLiveness.mockRejectedValueOnce(new Error('provider down'))
+    mockSession('active')
+    render(<IntegrationPage />)
+    await waitFor(() => expect(screen.getByTestId('mock-capture')).toBeInTheDocument())
+    screen.getByText('attempt-eligible').click()
+    screen.getByText('auto-process').click()
+    await waitFor(() =>
+      expect(
+        screen.getByText("We couldn't verify your photo. Please try again."),
+      ).toBeInTheDocument(),
+    )
+    expect(mockTriggerPortrait).not.toHaveBeenCalled()
+  })
+
+  it('auto-processing failure shows a safe error with Retry (back to capture)', async () => {
     mockUploadCapture.mockRejectedValueOnce(new Error('network'))
     mockSession('active')
     render(<IntegrationPage />)
     await waitFor(() => expect(screen.getByTestId('mock-capture')).toBeInTheDocument())
     screen.getByText('attempt-eligible').click()
-    screen.getByText('use-photo').click()
+    screen.getByText('auto-process').click()
     await waitFor(() =>
       expect(
-        screen.getByText('Your photo could not be uploaded. Please try again.'),
+        screen.getByText('Your photo could not be prepared. Please try again.'),
       ).toBeInTheDocument(),
     )
-    // No portrait stage; still on capture/Review.
-    expect(screen.queryByText('Prepare portrait')).not.toBeInTheDocument()
-    expect(mockUploadCapture).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+    expect(screen.queryByTestId('mock-capture')).not.toBeInTheDocument()
+
+    // Retry returns to the camera journey (fresh shared capture mount).
+    screen.getByRole('button', { name: 'Retry' }).click()
+    await waitFor(() => expect(screen.getByTestId('mock-capture')).toBeInTheDocument())
+  })
+
+  it('Submit calls the browser submit API and submit failure keeps the portrait for retry', async () => {
+    mockSubmitForConsumer.mockRejectedValueOnce(new Error('callback'))
+    mockSession('active')
+    render(<IntegrationPage />)
+    await waitFor(() => expect(screen.getByTestId('mock-capture')).toBeInTheDocument())
+    screen.getByText('attempt-eligible').click()
+    screen.getByText('auto-process').click()
+    await waitFor(() => expect(screen.getByText('Submit photo')).toBeInTheDocument())
+
+    screen.getByText('Submit photo').click()
+    await waitFor(() => expect(mockSubmitForConsumer).toHaveBeenCalledTimes(1))
+
+    // Callback/submit failure: portrait remains and Submit can be pressed again.
+    await waitFor(() =>
+      expect(
+        screen.getByText('Your photo could not be submitted. Please try again.'),
+      ).toBeInTheDocument(),
+    )
+    expect(screen.getByText('Submit photo')).toBeInTheDocument()
+    expect(screen.getByText('Retry')).toBeInTheDocument()
   })
 })

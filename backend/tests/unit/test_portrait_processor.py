@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import io
 
+import numpy as np
 import pytest
 from PIL import Image
 
 from app.core.config import Settings
 from app.portrait import (
     FakePortraitSegmentation,
+    PortraitErrorCode,
     PortraitProcessingError,
     PortraitProcessor,
 )
@@ -166,3 +168,62 @@ def test_json_metadata_contains_no_image_data(store: TransactionFileStore) -> No
     text = raw.decode("utf-8")
     assert "base64" not in text.lower()
     assert "sha256" in text or "model_hash" in text
+
+
+class _WideMobileSegmentation:
+    """Segmentation reproducing the mobile 720x1280 wide-shoulders geometry."""
+
+    @property
+    def info(self) -> dict[str, str]:
+        return {"name": "wide-mobile-test", "backend": "test", "sha256": "fake"}
+
+    def predict_alpha(self, image: Image.Image) -> np.ndarray:
+        width, height = image.size
+        yy, xx = np.mgrid[0:height, 0:width]
+        head = ((xx - width / 2) / (width * 0.18)) ** 2 + (
+            (yy - height * 0.28) / (height * 0.125)
+        ) ** 2 <= 1.0
+        half_width = np.maximum(width * 0.44 - 0.02 * (yy - height * 0.37), width * 0.16)
+        shoulders = (
+            (yy >= height * 0.37) & (yy <= height * 0.70) & (np.abs(xx - width / 2) <= half_width)
+        )
+        return (head | shoulders).astype(np.float32)
+
+
+class _MismatchedAlphaSegmentation:
+    """Deliberately returns an alpha whose shape does not match the source image."""
+
+    @property
+    def info(self) -> dict[str, str]:
+        return {"name": "mismatch-test", "backend": "test", "sha256": "fake"}
+
+    def predict_alpha(self, image: Image.Image) -> np.ndarray:
+        return _WideMobileSegmentation().predict_alpha(image)[::2, ::2]
+
+
+@pytest.mark.asyncio
+async def test_mobile_720x1280_no_broadcasting_error(store: TransactionFileStore) -> None:
+    """The confirmed failing source (720x1280, wide shoulders) must process without a broadcasting
+    ValueError and produce a valid 3:4 portrait."""
+    tx_id = "m" * 32
+    store.create_transaction(tx_id, {"status": "CREATED"})
+    store.write_artifact(tx_id, ArtifactType.SELECTED_ORIGINAL_CAPTURE, _jpeg(720, 1280))
+    processor = PortraitProcessor(_settings(), store, segmentation=_WideMobileSegmentation())
+    result = await processor.process(_source(tx_id), tx_id)
+    assert result.status == "SUCCESS"
+    assert result.width > 0 and result.height > 0
+    assert abs(result.width / result.height - 3 / 4) < 0.02
+    assert store.artifact_exists(tx_id, "portrait/processed.jpg")
+
+
+@pytest.mark.asyncio
+async def test_processor_rejects_crop_dimension_mismatch(store: TransactionFileStore) -> None:
+    """The defensive foreground/alpha dimension check must raise a typed error (no silent wrong
+    composite) when the alpha and image crop regions cannot match."""
+    tx_id = "q" * 32
+    store.create_transaction(tx_id, {"status": "CREATED"})
+    store.write_artifact(tx_id, ArtifactType.SELECTED_ORIGINAL_CAPTURE, _jpeg(640, 800))
+    processor = PortraitProcessor(_settings(), store, segmentation=_MismatchedAlphaSegmentation())
+    with pytest.raises(PortraitProcessingError) as exc_info:
+        await processor.process(_source(tx_id), tx_id)
+    assert exc_info.value.code == PortraitErrorCode.PORTRAIT_INVALID_SOURCE

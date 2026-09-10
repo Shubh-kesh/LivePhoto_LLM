@@ -20,6 +20,8 @@ from app.api.deps import (
 from app.api.v1.experiments import _read_bounded, _validate_image
 from app.core.config import Settings
 from app.core.errors import ApiError
+from app.domain.decision import DecisionOutcome
+from app.experiments.vlm import liveness
 from app.integrations import ConsumerRegistry
 from app.integrations.attempts import (
     AttemptResult,
@@ -27,6 +29,7 @@ from app.integrations.attempts import (
     AttemptValidationError,
     read_attempt_summary,
     register_attempt,
+    register_attempt_locked,
 )
 from app.integrations.browser_session import launch_outcome_cookie_name
 from app.integrations.callback import (
@@ -42,8 +45,9 @@ from app.integrations.consumers import ConsumerProfile
 from app.integrations.store import IntegrationIndexStore
 from app.observability import metrics
 from app.portrait import PortraitErrorCode, PortraitProcessingError, PortraitProcessor
+from app.providers.vision import VlmError
 from app.transactions import ArtifactType, TransactionStatus
-from app.transactions.decisions import has_canonical_pass, read_decision
+from app.transactions.decisions import build_decision, read_decision, write_decision
 from app.transactions.store import (
     TERMINAL_TRANSACTION_STATUSES,
     TransactionFileStore,
@@ -144,9 +148,9 @@ def browser_session(request: Request) -> Response:
         )
 
     attempts = read_attempt_summary(_store(request), internal_tx_id, settings.capture_attempt_limit)
-    submission_ready = has_canonical_pass(_store(request), internal_tx_id) and _portrait_ready(
+    submission_ready = liveness.has_current_canonical_pass(
         _store(request), internal_tx_id
-    )
+    ) and liveness.portrait_authorization_current(_store(request), internal_tx_id)
     return JSONResponse(
         {
             "state": "active",
@@ -159,6 +163,7 @@ def browser_session(request: Request) -> Response:
         }
     )
 
+
 @router.get("/portrait")
 def browser_portrait_image(request: Request) -> Response:
     record = require_active_session(request)
@@ -170,6 +175,13 @@ def browser_portrait_image(request: Request) -> Response:
         raise ApiError(
             code="PORTRAIT_NOT_READY",
             message="Portrait is not ready",
+            status_code=404,
+        )
+    # Only the CURRENT capture's authorized portrait may be displayed (never a stale one).
+    if not liveness.portrait_authorization_current(store, internal_tx_id):
+        raise ApiError(
+            code="PORTRAIT_NOT_READY",
+            message="Portrait is not ready for the current capture",
             status_code=404,
         )
 
@@ -234,51 +246,207 @@ async def browser_capture(
     data = await _read_bounded(selected_image, settings.vlm_max_single_image_bytes)
     mime = _validate_image(data, selected_image.content_type or "image/jpeg")
 
-    # Register the attempt (capture path). Same attempt_id may already be recorded via /attempts.
-    # mark_uploaded enforces one upload per attempt (a second upload for the same id is rejected).
+    # Atomically under the transaction lock: register the attempt (at-most-once, one upload per
+    # attempt) AND persist the new capture. Accepting a new capture supersedes/invalidates the
+    # previous capture's authorization (stale PASS/portrait/VLM result must never authorize the new
+    # capture), so the transaction returns to a non-authorized state before this endpoint returns.
+    with store.lock_transaction(internal_tx_id):
+        try:
+            attempt = register_attempt_locked(
+                settings,
+                store,
+                internal_tx_id,
+                attempt_id=attempt_id,
+                result=None,
+                reason_code=None,
+                max_attempts=_max_attempts_for_tx(
+                    request, internal_tx_id, settings.capture_attempt_limit
+                ),
+                mark_uploaded=True,
+            )
+        except AttemptUploadRejectedError as exc:
+            raise ApiError(
+                code="UPLOAD_ALREADY_RECORDED",
+                message="This attempt already uploaded a selected original",
+                status_code=409,
+            ) from exc
+        if attempt.terminal:
+            return JSONResponse(_attempt_response(attempt), status_code=409)
+
+        store.write_artifact(
+            internal_tx_id,
+            ArtifactType.SELECTED_ORIGINAL_CAPTURE,
+            data,
+            content_type=mime,
+        )
+        store.write_json(
+            internal_tx_id,
+            "capture/capture.json",
+            {
+                "transaction_id": internal_tx_id,
+                "attempt_id": attempt_id,
+                "mime_type": mime,
+                "size_bytes": len(data),
+                "sha256": sha256_hex(data),
+                "capture_config_version": capture_config_version,
+                "quality_config_version": quality_config_version,
+            },
+        )
+        # Supersede the previous capture's authorization (defense in depth: remove old artifacts).
+        liveness.invalidate_authorization(store, internal_tx_id)
+        store.update_transaction_status(internal_tx_id, TransactionStatus.CAPTURE_READY.value)
+    metrics.record_capture_attempt(_consumer_for_tx(request, internal_tx_id))
+    return JSONResponse(_attempt_response(attempt))
+
+
+@router.post("/liveness")
+async def browser_liveness(request: Request) -> Response:
+    """Server-authoritative liveness evaluation of the CURRENT stored capture (pre-M6 Groq gate).
+
+    The evaluation identity is derived SERVER-SIDE from the stored capture metadata
+    (``capture/capture.json``: attempt_id + selected-original SHA-256); the browser cannot influence
+    it. Provider calls are single-flight per identity and provider failures are cached. A canonical
+    decision is written ONLY when the backend classification is LIVE AND the capture is still the
+    current one when the provider returns (stale in-flight results are never promoted).
+    """
+    record = require_active_session(request)
+    require_csrf(request, record)
+    internal_tx_id = record["transaction_id"]
+    store = _store(request)
+    settings = _settings(request)
+    _terminal_blocked(request, internal_tx_id)
+
+    key = liveness.current_capture_key(store, internal_tx_id)
+    if key is None:
+        raise ApiError(code="CAPTURE_NOT_READY", message="No capture uploaded", status_code=409)
+    identity = liveness.liveness_identity(key["attempt_id"], key["selected_sha256"])
+
+    # --- claim/cache check under a SHORT lock (no provider call while holding the lock) ---
+    with store.lock_transaction(internal_tx_id):
+        cached = liveness.read_evaluation(store, internal_tx_id, identity)
+        if cached is not None:
+            if cached.get("error"):
+                metrics.record_submit("liveness_cached_error")
+                raise ApiError(
+                    code="LIVENESS_UNAVAILABLE",
+                    message="We couldn't verify your photo. Please try again.",
+                    status_code=502,
+                )
+            outcome = DecisionOutcome(cached["outcome"])
+            metrics.record_submit(
+                "live" if outcome == DecisionOutcome.PASS else outcome.value.lower()
+            )
+            return JSONResponse(
+                {
+                    "classification": cached.get("classification"),
+                    "outcome": outcome.value,
+                    "portrait_allowed": cached.get("portrait_allowed", False),
+                }
+            )
+        if liveness.is_evaluation_claimed(store, internal_tx_id, identity):
+            if liveness.evaluation_claim_ready(store, internal_tx_id, identity, settings):
+                # Crashed/stale claim older than the bounded timeout: recover by clearing it.
+                liveness.clear_evaluation_claim(store, internal_tx_id, identity)
+            else:
+                metrics.record_submit("liveness_in_progress")
+                raise ApiError(
+                    code="LIVENESS_IN_PROGRESS",
+                    message="Liveness evaluation is already in progress",
+                    status_code=202,
+                )
+        liveness.set_evaluation_claim(store, internal_tx_id, identity)
+
+    # --- provider call (no lock held; event loop free) ---
     try:
-        attempt = register_attempt(
+        evaluation = await liveness.evaluate_capture(
             settings,
             store,
             internal_tx_id,
-            attempt_id=attempt_id,
-            result=None,
-            reason_code=None,
-            max_attempts=_max_attempts_for_tx(
-                request, internal_tx_id, settings.capture_attempt_limit
-            ),
-            mark_uploaded=True,
+            attempt_id=key["attempt_id"],
+            selected_sha256=key["selected_sha256"],
         )
-    except AttemptUploadRejectedError as exc:
-        raise ApiError(
-            code="UPLOAD_ALREADY_RECORDED",
-            message="This attempt already uploaded a selected original",
-            status_code=409,
-        ) from exc
-    if attempt.terminal:
-        return JSONResponse(_attempt_response(attempt), status_code=409)
+    except VlmError as exc:
+        # Hard provider/availability failure (e.g. VLM disabled in production). Clear the claim and
+        # cache a fail-closed outcome so a repeat does not re-call the provider for this capture.
+        with store.lock_transaction(internal_tx_id):
+            err_now_key = liveness.current_capture_key(store, internal_tx_id)
+            liveness.clear_evaluation_claim(store, internal_tx_id, identity)
+            if err_now_key is not None:
+                err_now_identity = liveness.liveness_identity(
+                    err_now_key["attempt_id"], err_now_key["selected_sha256"]
+                )
+                if err_now_identity == identity:
+                    liveness.persist_error_evaluation(
+                        store,
+                        internal_tx_id,
+                        identity,
+                        attempt_id=err_now_key["attempt_id"],
+                        selected_sha256=err_now_key["selected_sha256"],
+                        error_code=exc.code.value,
+                    )
+        metrics.record_submit("liveness_error")
+        raise
 
-    store.write_artifact(
+    # --- reacquire lock: stale check + persist + (maybe) promote to canonical decision ---
+    with store.lock_transaction(internal_tx_id):
+        now_key = liveness.current_capture_key(store, internal_tx_id)
+        now_identity: str | None = (
+            liveness.liveness_identity(now_key["attempt_id"], now_key["selected_sha256"])
+            if now_key
+            else None
+        )
+        liveness.clear_evaluation_claim(store, internal_tx_id, identity)
+        if now_identity != identity:
+            # A newer capture superseded this one while the provider was in flight. Retain the
+            # result as historical evidence but NEVER promote it to the current decision.
+            liveness.persist_evaluation(
+                store, internal_tx_id, identity, dict(evaluation, stale=True, promoted=False)
+            )
+            metrics.record_submit("liveness_stale")
+            raise ApiError(
+                code="STALE_EVALUATION",
+                message="The capture changed during evaluation; please try again.",
+                status_code=409,
+            )
+        liveness.persist_evaluation(store, internal_tx_id, identity, evaluation)
+        if evaluation.get("error"):
+            # Fail closed: no PASS; cached so a repeat does not re-call the provider.
+            metrics.record_submit("liveness_error")
+            raise ApiError(
+                code="LIVENESS_UNAVAILABLE",
+                message="We couldn't verify your photo. Please try again.",
+                status_code=502,
+            )
+        outcome = DecisionOutcome(evaluation["outcome"])
+        _write_liveness_decision_bound(store, internal_tx_id, outcome, evaluation, identity)
+        metrics.record_submit("live" if outcome == DecisionOutcome.PASS else outcome.value.lower())
+        return JSONResponse(
+            {
+                "classification": evaluation.get("classification"),
+                "outcome": outcome.value,
+                "portrait_allowed": evaluation["portrait_allowed"],
+            }
+        )
+
+
+def _write_liveness_decision_bound(
+    store: TransactionFileStore,
+    internal_tx_id: str,
+    outcome: DecisionOutcome,
+    evaluation: dict[str, Any],
+    identity: str,
+) -> None:
+    """Write a canonical decision bound to the current capture (metadata = attempt/SHA/identity)."""
+    decision = build_decision(
         internal_tx_id,
-        ArtifactType.SELECTED_ORIGINAL_CAPTURE,
-        data,
-        content_type=mime,
+        outcome=outcome,
+        source=liveness.LIVENESS_DECISION_SOURCE,
+        version=liveness.LIVENESS_DECISION_VERSION,
+        evidence_refs=[liveness.evaluation_relative_path(identity)],
+        metadata=liveness.decision_metadata_for(evaluation, identity=identity),
     )
-    store.write_json(
-        internal_tx_id,
-        "capture/capture.json",
-        {
-            "transaction_id": internal_tx_id,
-            "mime_type": mime,
-            "size_bytes": len(data),
-            "sha256": sha256_hex(data),
-            "capture_config_version": capture_config_version,
-            "quality_config_version": quality_config_version,
-        },
-    )
-    store.update_transaction_status(internal_tx_id, TransactionStatus.CAPTURE_READY.value)
-    metrics.record_capture_attempt(_consumer_for_tx(request, internal_tx_id))
-    return JSONResponse(_attempt_response(attempt))
+    write_decision(store, internal_tx_id, decision)
+    store.update_transaction_status(internal_tx_id, TransactionStatus.DECISION_READY.value)
 
 
 @router.post("/portrait")
@@ -289,13 +457,49 @@ async def browser_portrait(request: Request, face_box: str = Form("")) -> Respon
     _terminal_blocked(request, internal_tx_id)
     settings = _settings(request)
     store = _store(request)
-    _require_canonical_pass(request, internal_tx_id)
+
     if not settings.portrait_processing_enabled:
         raise PortraitProcessingError(
             PortraitErrorCode.PORTRAIT_PROCESSING_FAILED, "portrait processing is disabled"
         )
+
     from app.transactions import ArtifactReference
 
+    # Single-flight per liveness identity, under a short lock (no processing while holding it).
+    with store.lock_transaction(internal_tx_id):
+        # Idempotency: an already-current authorized portrait is reused (no duplicate processing).
+        if liveness.portrait_authorization_current(store, internal_tx_id):
+            existing_sha = _portrait_sha256(store, internal_tx_id)
+            return JSONResponse(
+                {
+                    "status": "SUCCESS",
+                    "output_artifact": "portrait/processed.jpg",
+                    "sha256": existing_sha,
+                    "reused": True,
+                }
+            )
+        snapshot = liveness.capture_snapshot(store, internal_tx_id)
+        if snapshot is None:
+            raise ApiError(
+                code="NOT_READY",
+                message="A canonical decision is not yet available",
+                status_code=412,
+            )
+        identity = snapshot["liveness_identity"]
+        if liveness.is_portrait_claimed(store, internal_tx_id, identity):
+            if liveness.portrait_claim_ready(store, internal_tx_id, identity, settings):
+                # Crashed/stale portrait claim older than the bounded timeout: recover.
+                liveness.clear_portrait_claim(store, internal_tx_id, identity)
+            else:
+                metrics.record_submit("portrait_in_progress")
+                raise ApiError(
+                    code="PORTRAIT_IN_PROGRESS",
+                    message="Portrait processing is already in progress",
+                    status_code=202,
+                )
+        liveness.set_portrait_claim(store, internal_tx_id, identity)
+
+    candidate_rel = liveness.portrait_candidate_path(identity)
     source_ref = ArtifactReference(
         transaction_id=internal_tx_id,
         artifact_type=ArtifactType.SELECTED_ORIGINAL_CAPTURE,
@@ -305,14 +509,69 @@ async def browser_portrait(request: Request, face_box: str = Form("")) -> Respon
     processor = PortraitProcessor(
         settings, store, segmentation=getattr(request.app.state, "portrait_segmentation", None)
     )
-    result = await processor.process(source_ref, internal_tx_id)
+    # Process into an identity-specific candidate (never directly overwrite the authoritative
+    # portrait/processed.jpg while another capture may be in flight).
+    try:
+        await processor.process(source_ref, internal_tx_id, output_relative_path=candidate_rel)
+    except Exception:
+        _clear_portrait_claim(store, internal_tx_id, identity)
+        raise
+
+    # Promote only if the snapshot decision/capture is STILL the current one.
+    with store.lock_transaction(internal_tx_id):
+        liveness.clear_portrait_claim(store, internal_tx_id, identity)
+        if not liveness.snapshot_matches_current(store, internal_tx_id, snapshot):
+            # A newer capture superseded this one while processing: discard the stale candidate. A
+            # stale operation must NEVER mutate the newer capture's transaction state.
+            _safe_remove(store, internal_tx_id, candidate_rel)
+            metrics.record_submit("stale_portrait")
+            raise ApiError(
+                code="STALE_PORTRAIT",
+                message="The capture changed during portrait processing; please try again.",
+                status_code=409,
+            )
+        candidate_bytes = store.read_artifact(internal_tx_id, candidate_rel)
+        ref = store.write_artifact(
+            internal_tx_id,
+            ArtifactType.PROCESSED_PORTRAIT,
+            candidate_bytes,
+            content_type="image/jpeg",
+        )
+        _safe_remove(store, internal_tx_id, candidate_rel)
+        liveness.write_portrait_authorization(
+            store,
+            internal_tx_id,
+            decision_id=snapshot["decision_id"],
+            attempt_id=snapshot["attempt_id"],
+            selected_sha256=snapshot["selected_sha256"],
+            identity=identity,
+            portrait_sha256=ref.sha256,
+        )
+        store.update_transaction_status(internal_tx_id, TransactionStatus.PORTRAIT_READY.value)
     return JSONResponse(
         {
-            "status": result.status,
-            "output_artifact": result.output_artifact.relative_path,
-            "sha256": result.output_artifact.sha256,
+            "status": "SUCCESS",
+            "output_artifact": ref.relative_path,
+            "sha256": ref.sha256,
         }
     )
+
+
+def _safe_remove(store: TransactionFileStore, internal_tx_id: str, relative_path: str) -> None:
+    from contextlib import suppress
+
+    with suppress(Exception):  # pragma: no cover - defensive
+        store.remove_artifact(internal_tx_id, relative_path)
+
+
+def _portrait_sha256(store: TransactionFileStore, internal_tx_id: str) -> str:
+    data = store.read_artifact(internal_tx_id, "portrait/processed.jpg")
+    return sha256_hex(data)
+
+
+def _clear_portrait_claim(store: TransactionFileStore, internal_tx_id: str, identity: str) -> None:
+    with store.lock_transaction(internal_tx_id):
+        liveness.clear_portrait_claim(store, internal_tx_id, identity)
 
 
 # @router.get("/portrait")
@@ -323,7 +582,7 @@ async def browser_portrait(request: Request, face_box: str = Form("")) -> Respon
 #     store = _store(request)
 #     path = "portrait/processed.jpg"
 #     if not store.artifact_exists(internal_tx_id, path):
-#         raise ApiError(code="PORTRAIT_NOT_READY", message="Portrait is not ready", status_code=404)
+#         raise ApiError(code="PORTRAIT_NOT_READY", message="Portrait is not ready", 404)
 #     data = store.read_artifact(internal_tx_id, path)
 #     return Response(
 #         content=data,
@@ -352,11 +611,19 @@ async def browser_submit(request: Request) -> Response:
             raise ApiError(code="TRANSACTION_TERMINAL", message="Terminal state", status_code=409)
 
         decision = read_decision(store, internal_tx_id)
-        if decision is None or not has_canonical_pass(store, internal_tx_id):
+        if decision is None or not liveness.has_current_canonical_pass(store, internal_tx_id):
             metrics.record_submit("not_ready")
             raise ApiError(
                 code="NOT_READY",
                 message="A canonical decision is not yet available",
+                status_code=412,
+            )
+        # The processed portrait must be authorized by the CURRENT PASS/capture (never a stale one).
+        if not liveness.portrait_authorization_current(store, internal_tx_id):
+            metrics.record_submit("not_ready")
+            raise ApiError(
+                code="NOT_READY",
+                message="The processed portrait is not ready for submission",
                 status_code=412,
             )
 
@@ -465,17 +732,6 @@ async def browser_submit(request: Request) -> Response:
         metrics.record_callback(consumer_id, "acknowledged", delivery.latency_ms / 1000.0)
         metrics.record_submit("ready")
         return JSONResponse({"redirect_url": delivery.redirect_url})
-
-
-def _require_canonical_pass(request: Request, internal_tx_id: str) -> None:
-    if not has_canonical_pass(_store(request), internal_tx_id):
-        raise ApiError(
-            code="NOT_READY", message="A canonical decision is not yet available", status_code=412
-        )
-
-
-def _portrait_ready(store: TransactionFileStore, internal_tx_id: str) -> bool:
-    return store.artifact_exists(internal_tx_id, "portrait/processed.jpg")
 
 
 def _read_portrait_with_integrity(request: Request, internal_tx_id: str) -> bytes:

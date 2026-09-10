@@ -92,6 +92,21 @@ export async function processPortrait(
   return apiPostMultipart(`/api/v1/transactions/${transactionId}/portrait`, form, 60_000)
 }
 
+/** Server-authoritative liveness of a stored capture (configured VLM_PROVIDER; /capture streamlined). */
+export async function evaluateTransactionLiveness(
+  transactionId: string,
+  attemptId?: string,
+): Promise<{ classification: string | null; outcome: string; portrait_allowed: boolean }> {
+  const form = new FormData()
+  if (attemptId) form.append('attempt_id', attemptId)
+  const data: unknown = await apiPostMultipart(
+    `/api/v1/transactions/${transactionId}/liveness`,
+    form,
+    60_000,
+  )
+  return data as { classification: string | null; outcome: string; portrait_allowed: boolean }
+}
+
 /** Controlled artifact URL for display (never an absolute server filesystem path) (M5.7 §62). */
 export function transactionArtifactUrl(transactionId: string, artifactType: string): string {
   return `${API_BASE_URL}/api/v1/transactions/${transactionId}/artifacts/${artifactType}`

@@ -198,3 +198,70 @@ def test_storage_readiness_ok(tmp_path) -> None:
         assert response.status_code == 200
         names = [check["name"] for check in response.json()["checks"]]
         assert "file_storage" in names
+
+
+def test_transaction_liveness_live_allows_portrait(tmp_path) -> None:
+    """Transaction liveness: backend LIVE -> outcome PASS, portrait endpoint succeeds."""
+    app = _make_app(tmp_path, vlm_provider="mock", vlm_mock_behavior="live")
+    with TestClient(app) as client:
+        tx_id = _create_transaction(client)
+        response = client.post(f"/api/v1/transactions/{tx_id}/liveness")
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["classification"] == "LIVE"
+        assert body["outcome"] == "PASS"
+        assert body["portrait_allowed"] is True
+        portrait = client.post(f"/api/v1/transactions/{tx_id}/portrait")
+        assert portrait.status_code == 200, portrait.text
+    store: TransactionFileStore = app.state.transaction_store
+    assert store.artifact_exists(tx_id, "portrait/processed.jpg")
+
+
+def test_transaction_liveness_non_live_blocks_portrait(tmp_path) -> None:
+    """Transaction liveness: non-LIVE -> FAIL, portrait endpoint stays blocked."""
+    app = _make_app(tmp_path, vlm_provider="mock", vlm_mock_behavior="screen_replay")
+    with TestClient(app) as client:
+        tx_id = _create_transaction(client)
+        response = client.post(f"/api/v1/transactions/{tx_id}/liveness")
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["classification"] == "SCREEN_REPLAY"
+        assert body["outcome"] == "FAIL"
+        assert body["portrait_allowed"] is False
+        portrait = client.post(f"/api/v1/transactions/{tx_id}/portrait")
+        assert portrait.status_code == 500
+        assert portrait.json()["error"]["code"] == "PORTRAIT_PROCESSING_FAILED"
+    store: TransactionFileStore = app.state.transaction_store
+    assert not store.artifact_exists(tx_id, "portrait/processed.jpg")
+
+
+def test_transaction_liveness_gated_when_experiment_disabled(tmp_path) -> None:
+    app = _make_app(tmp_path, vlm_experiment_enabled=False)
+    with TestClient(app) as client:
+        response = client.post("/api/v1/transactions/00000000000000000000000000000000/liveness")
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "VLM_DISABLED"
+
+
+def test_transaction_liveness_idempotent_single_provider_call(tmp_path, monkeypatch) -> None:
+    """A repeated evaluation for the same capture returns the stored result (one provider call)."""
+    from app.experiments.vlm import VlmEvaluationService
+
+    calls: list[int] = [0]
+    original = VlmEvaluationService.evaluate
+
+    async def counting_evaluate(self, request):
+        calls[0] += 1
+        return await original(self, request)
+
+    monkeypatch.setattr(VlmEvaluationService, "evaluate", counting_evaluate)
+
+    app = _make_app(tmp_path, vlm_provider="mock", vlm_mock_behavior="live")
+    with TestClient(app) as client:
+        tx_id = _create_transaction(client)
+        first = client.post(f"/api/v1/transactions/{tx_id}/liveness")
+        assert first.status_code == 200
+        second = client.post(f"/api/v1/transactions/{tx_id}/liveness")
+        assert second.status_code == 200
+        assert first.json() == second.json()
+    assert calls[0] == 1  # second call served from the persisted evaluation

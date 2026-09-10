@@ -32,18 +32,28 @@ class DecisionRecord(BaseModel):
     decision_source: str
     decision_version: str
     evidence_refs: list[str] = Field(default_factory=list)
+    #: Safe metadata identifying how the decision was produced (provider/model/classification). No
+    #: credentials, raw provider text or image bytes are ever stored here.
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 def build_decision(
-    transaction_id: str, source: str = "test-only", version: str = "m5.8-dev"
+    transaction_id: str,
+    outcome: DecisionOutcome = DecisionOutcome.PASS,
+    source: str = "test-only",
+    version: str = "m5.8-dev",
+    metadata: dict[str, Any] | None = None,
+    evidence_refs: list[str] | None = None,
 ) -> DecisionRecord:
     return DecisionRecord(
         decision_id=uuid.uuid4().hex,
         transaction_id=transaction_id,
-        outcome=DecisionOutcome.PASS,
+        outcome=outcome,
         decided_at=datetime.datetime.now(datetime.UTC).isoformat(),
         decision_source=source,
         decision_version=version,
+        evidence_refs=evidence_refs or [],
+        metadata=metadata or {},
     )
 
 

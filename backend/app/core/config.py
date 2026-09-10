@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     vlm_max_single_image_bytes: int = 5 * 1024 * 1024
     vlm_max_total_image_bytes: int = 15 * 1024 * 1024
     vlm_allowed_mime_types: tuple[str, ...] = ("image/jpeg",)
+    #: Deterministic mock-provider behavior for the server-authoritative liveness path. Test-only:
+    #: only ever honored when VLM_PROVIDER=mock (mock is unavailable in uat/production). Never a
+    #: browser-supplied value.
+    vlm_mock_behavior: str = ""
 
     gemini_api_key: SecretStr = SecretStr("")
     gemini_model: str = ""

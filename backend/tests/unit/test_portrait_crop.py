@@ -147,3 +147,88 @@ def test_balanced_side_margins() -> None:
     assert left_margin >= int(0.02 * crop.width)
     assert right_margin >= int(0.02 * crop.width)
     assert abs(left_margin - right_margin) <= int(0.06 * crop.width)
+
+
+def _wide_mobile_alpha(width: int = 720, height: int = 1280) -> np.ndarray:
+    """Subject whose shoulders span nearly the full width (reproduces the mobile overflow)."""
+    yy, xx = np.mgrid[0:height, 0:width]
+    head = ((xx - width / 2) / (width * 0.18)) ** 2 + (
+        (yy - height * 0.28) / (height * 0.125)
+    ) ** 2 <= 1.0
+    half_width = np.maximum(width * 0.44 - 0.02 * (yy - height * 0.37), width * 0.16)
+    shoulders = (
+        (yy >= height * 0.37) & (yy <= height * 0.70) & (np.abs(xx - width / 2) <= half_width)
+    )
+    return (head | shoulders).astype(np.float32)
+
+
+def _face_box_for(width: int, height: int) -> tuple[float, float, float, float]:
+    return (0.39, 0.20, 0.22, 0.24)
+
+
+def _assert_inside(box, width: int, height: int) -> None:
+    assert 0 <= box.x0 < box.x1 <= width, box
+    assert 0 <= box.y0 < box.y1 <= height, box
+    assert box.width <= width and box.height <= height, box
+
+
+def test_mobile_720x1280_desired_width_exceeds_source() -> None:
+    """The confirmed failing geometry: desired 3:4 width > source width must stay in bounds."""
+    width, height = 720, 1280
+    alpha = _wide_mobile_alpha(width, height)
+    box = passport_crop(alpha, (width, height), face_box_normalized=_face_box_for(width, height))
+    assert box.x0 >= 0
+    assert box.x1 <= width
+    assert box.width <= width
+    assert box.height <= height
+    _assert_inside(box, width, height)
+    # 3:4 preserved as closely as integer rounding permits.
+    assert abs(box.width / box.height - PORTRAIT_ASPECT) <= 0.02
+    # No negative NumPy slicing: the alpha slice is fully inside the source alpha.
+    assert box.x0 >= 0 and box.y0 >= 0
+
+
+def test_mobile_720x1280_full_pipeline_slices_valid() -> None:
+    alpha = _wide_mobile_alpha()
+    box = passport_crop(alpha, (720, 1280), face_box_normalized=(0.40, 0.20, 0.22, 0.24))
+    a = alpha[box.y0 : box.y1, box.x0 : box.x1]
+    assert a.shape == (box.height, box.width)
+
+
+def test_narrow_portrait_source() -> None:
+    width, height = 120, 1200
+    alpha = _wide_mobile_alpha(width, height)
+    box = passport_crop(alpha, (width, height), face_box_normalized=(0.2, 0.1, 0.6, 0.3))
+    _assert_inside(box, width, height)
+    assert abs(box.width / box.height - PORTRAIT_ASPECT) <= 0.02
+
+
+def test_desired_crop_taller_than_source() -> None:
+    width, height = 800, 600
+    yy, xx = np.mgrid[0:height, 0:width]
+    head = ((xx - width / 2) / (width * 0.1)) ** 2 + (
+        (yy - height * 0.25) / (height * 0.12)
+    ) ** 2 <= 1.0
+    half_width = np.maximum(width * 0.28 - 0.02 * (yy - height * 0.4), width * 0.1)
+    shoulders = (yy >= height * 0.4) & (yy <= height * 0.8) & (np.abs(xx - width / 2) <= half_width)
+    alpha = (head | shoulders).astype(np.float32)
+    box = passport_crop(alpha, (width, height), face_box_normalized=(0.35, 0.1, 0.3, 0.3))
+    _assert_inside(box, width, height)
+    assert abs(box.width / box.height - PORTRAIT_ASPECT) <= 0.02
+
+
+def test_crop_invariants_multiple_source_sizes() -> None:
+    for width, height in [
+        (720, 1280),
+        (1280, 720),
+        (120, 1200),
+        (800, 600),
+        (640, 800),
+        (500, 500),
+    ]:
+        alpha = _wide_mobile_alpha(width, height)
+        box = passport_crop(
+            alpha, (width, height), face_box_normalized=_face_box_for(width, height)
+        )
+        _assert_inside(box, width, height)
+        assert abs(box.width / box.height - PORTRAIT_ASPECT) <= 0.02

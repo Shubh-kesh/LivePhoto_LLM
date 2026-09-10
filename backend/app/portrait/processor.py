@@ -32,6 +32,7 @@ from app.transactions import (
     ArtifactReference,
     ArtifactType,
     TransactionFileStore,
+    sha256_hex,
 )
 
 logger = get_logger("livephoto.portrait")
@@ -90,7 +91,15 @@ class PortraitProcessor:
         transaction_id: str,
         *,
         face_box_normalized: tuple[float, float, float, float] | None = None,
+        output_relative_path: str | None = None,
     ) -> PortraitProcessingResult:
+        """Run the portrait pipeline.
+
+        ``output_relative_path`` (when provided) stages the output at a transaction-relative
+        candidate path instead of the canonical ``portrait/processed.jpg``; the caller is
+        responsible for promoting the staged artifact to the authoritative path after verifying it
+        still matches the current capture/PASS (stale-portrait race protection).
+        """
         if not self.enabled:
             raise PortraitProcessingError(
                 PortraitErrorCode.PORTRAIT_PROCESSING_FAILED,
@@ -102,7 +111,11 @@ class PortraitProcessor:
                 "transaction does not exist",
             )
 
-        self._store.update_transaction_status(transaction_id, "PORTRAIT_PROCESSING")
+        # In candidate mode the caller owns the authoritative status/promotion; this run must not
+        # mutate the transaction's state (a stale candidate must never touch a newer capture).
+        candidate_mode = output_relative_path is not None
+        if not candidate_mode:
+            self._store.update_transaction_status(transaction_id, "PORTRAIT_PROCESSING")
         started = time.perf_counter()
         model = self._provider().info
         logger.info(
@@ -134,16 +147,48 @@ class PortraitProcessor:
             crop = image.crop((crop_box.x0, crop_box.y0, crop_box.x1, crop_box.y1))
             crop_alpha = alpha[crop_box.y0 : crop_box.y1, crop_box.x0 : crop_box.x1]
             foreground_rgb = np.asarray(crop.convert("RGB"))
+            # Defensive invariant: foreground and alpha crop regions must match spatially. A
+            # mismatch (e.g. an out-of-bounds CropBox causing negative NumPy slicing) must never
+            # silently produce a wrong composite.
+            if foreground_rgb.shape[0:2] != crop_alpha.shape[:2]:
+                logger.error(
+                    "portrait_crop_dimension_mismatch",
+                    transaction_id=transaction_id,
+                    crop_box=(
+                        crop_box.x0,
+                        crop_box.y0,
+                        crop_box.x1,
+                        crop_box.y1,
+                    ),
+                    image_size=(image.width, image.height),
+                    foreground_shape=tuple(foreground_rgb.shape[0:2]),
+                    alpha_shape=tuple(crop_alpha.shape[:2]),
+                )
+                raise PortraitProcessingError(
+                    PortraitErrorCode.PORTRAIT_INVALID_SOURCE,
+                    "portrait crop dimensions do not match the alpha matte",
+                )
             composed = composite_solid(foreground_rgb, crop_alpha, background_rgb)
             output = Image.fromarray(composed, mode="RGB")
 
             encoded = self._encode(output)
-            output_ref = self._store.write_artifact(
-                transaction_id,
-                ArtifactType.PROCESSED_PORTRAIT,
-                encoded,
-                content_type="image/jpeg",
-            )
+            if output_relative_path is not None:
+                self._store.write_bytes(transaction_id, output_relative_path, encoded)
+                output_ref = ArtifactReference(
+                    transaction_id=transaction_id,
+                    artifact_type=ArtifactType.PROCESSED_PORTRAIT,
+                    relative_path=output_relative_path,
+                    content_type="image/jpeg",
+                    size_bytes=len(encoded),
+                    sha256=sha256_hex(encoded),
+                )
+            else:
+                output_ref = self._store.write_artifact(
+                    transaction_id,
+                    ArtifactType.PROCESSED_PORTRAIT,
+                    encoded,
+                    content_type="image/jpeg",
+                )
 
             elapsed_ms = int((time.perf_counter() - started) * 1000)
             self._store.write_json(
@@ -160,7 +205,8 @@ class PortraitProcessor:
                     output.height,
                 ),
             )
-            self._store.update_transaction_status(transaction_id, "PORTRAIT_READY")
+            if not candidate_mode:
+                self._store.update_transaction_status(transaction_id, "PORTRAIT_READY")
 
             result = PortraitProcessingResult(
                 status="SUCCESS",
@@ -194,15 +240,25 @@ class PortraitProcessor:
             return result
         except Exception as exc:
             if isinstance(exc, PortraitProcessingError):
-                self._record_failure(transaction_id, source, model, exc.code.value)
+                self._record_failure(
+                    transaction_id, source, model, exc.code.value, candidate_mode=candidate_mode
+                )
                 raise
             if isinstance(exc, (UnidentifiedImageError, OSError, ValueError)):
-                self._record_failure(transaction_id, source, model, "decode_or_pipeline_failed")
+                self._record_failure(
+                    transaction_id,
+                    source,
+                    model,
+                    "decode_or_pipeline_failed",
+                    candidate_mode=candidate_mode,
+                )
                 raise PortraitProcessingError(
                     PortraitErrorCode.PORTRAIT_INVALID_SOURCE,
                     "portrait source image could not be processed",
                 ) from exc
-            self._record_failure(transaction_id, source, model, "unexpected")
+            self._record_failure(
+                transaction_id, source, model, "unexpected", candidate_mode=candidate_mode
+            )
             raise PortraitProcessingError(
                 PortraitErrorCode.PORTRAIT_PROCESSING_FAILED,
                 "portrait processing failed",
@@ -214,8 +270,11 @@ class PortraitProcessor:
         source: ArtifactReference,
         model: dict[str, str],
         error_code: str,
+        *,
+        candidate_mode: bool = False,
     ) -> None:
-        self._store.update_transaction_status(transaction_id, "TECHNICAL_ERROR")
+        if not candidate_mode:
+            self._store.update_transaction_status(transaction_id, "TECHNICAL_ERROR")
         logger.info(
             "portrait_processing_failed",
             transaction_id=transaction_id,

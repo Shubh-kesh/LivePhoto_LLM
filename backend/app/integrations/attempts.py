@@ -130,14 +130,35 @@ def register_attempt(
     max_attempts: int | None = None,
     mark_uploaded: bool = False,
 ) -> AttemptResult:
-    """Register a capture attempt at most once under the per-transaction lock (M5.8 §13, §15).
+    """Register a capture attempt at most once under the per-transaction lock (M5.8 §13, §15)."""
+    with tx_store.lock_transaction(internal_tx_id):
+        return register_attempt_locked(
+            settings,
+            tx_store,
+            internal_tx_id,
+            attempt_id=attempt_id,
+            result=result,
+            reason_code=reason_code,
+            max_attempts=max_attempts,
+            mark_uploaded=mark_uploaded,
+        )
 
-    The effective limit is the consumer-profile ``max_attempts`` when provided, else the global
-    ``CAPTURE_ATTEMPT_LIMIT``. Warning stages always come from server settings.
 
-    ``mark_uploaded=True`` is used by ``/browser/capture``: the attempt_id is recorded as uploaded
-    and a second upload with the same id is rejected (one upload per attempt) so a client cannot
-    overwrite ``selected-original.jpg`` repeatedly without consuming attempts.
+def register_attempt_locked(
+    settings: Settings,
+    tx_store: TransactionFileStore,
+    internal_tx_id: str,
+    *,
+    attempt_id: str,
+    result: str | None,
+    reason_code: str | None,
+    max_attempts: int | None = None,
+    mark_uploaded: bool = False,
+) -> AttemptResult:
+    """Same as ``register_attempt`` but assumes the per-transaction lock is already held.
+
+    Used by ``/browser/capture`` so attempt registration and capture-authorization invalidation are
+    atomic under one lock acquisition.
     """
     validate_result(result)
     validate_reason(reason_code)
@@ -148,50 +169,49 @@ def register_attempt(
     terminal = False
     warning = False
 
-    with tx_store.lock_transaction(internal_tx_id):
-        attempts = _read_attempts(tx_store, internal_tx_id, effective_limit)
-        uploaded = attempts.get("uploaded_attempt_ids", [])
-        if not isinstance(uploaded, list):
-            uploaded = []
-        if mark_uploaded and id_hash in uploaded:
-            raise AttemptUploadRejectedError("attempt already uploaded a selected original")
-        consumed = attempts.get("consumed_attempt_ids", [])
-        if not isinstance(consumed, list):
-            consumed = []
-        if id_hash not in consumed:
-            consumed.append(id_hash)
-            attempts["consumed_attempt_ids"] = consumed
-            attempts["attempt_count"] = int(attempts.get("attempt_count", 0)) + 1
-            if reason_code:
-                codes = attempts.get("reason_codes", [])
-                if not isinstance(codes, list):
-                    codes = []
-                if reason_code not in codes:
-                    codes.append(reason_code)
-                attempts["reason_codes"] = codes
-            attempts["updated_at"] = _now_iso()
-        if mark_uploaded and id_hash not in uploaded:
-            uploaded.append(id_hash)
-            attempts["uploaded_attempt_ids"] = uploaded
-        # Server-authoritative warning/limit stages come from settings, not stored defaults.
-        attempts["warning_stages"] = [
-            settings.capture_attempt_warning_at,
-            settings.capture_attempt_warning_again_at,
-        ]
-        attempts["limit"] = effective_limit
+    attempts = _read_attempts(tx_store, internal_tx_id, effective_limit)
+    uploaded = attempts.get("uploaded_attempt_ids", [])
+    if not isinstance(uploaded, list):
+        uploaded = []
+    if mark_uploaded and id_hash in uploaded:
+        raise AttemptUploadRejectedError("attempt already uploaded a selected original")
+    consumed = attempts.get("consumed_attempt_ids", [])
+    if not isinstance(consumed, list):
+        consumed = []
+    if id_hash not in consumed:
+        consumed.append(id_hash)
+        attempts["consumed_attempt_ids"] = consumed
+        attempts["attempt_count"] = int(attempts.get("attempt_count", 0)) + 1
+        if reason_code:
+            codes = attempts.get("reason_codes", [])
+            if not isinstance(codes, list):
+                codes = []
+            if reason_code not in codes:
+                codes.append(reason_code)
+            attempts["reason_codes"] = codes
+        attempts["updated_at"] = _now_iso()
+    if mark_uploaded and id_hash not in uploaded:
+        uploaded.append(id_hash)
+        attempts["uploaded_attempt_ids"] = uploaded
+    # Server-authoritative warning/limit stages come from settings, not stored defaults.
+    attempts["warning_stages"] = [
+        settings.capture_attempt_warning_at,
+        settings.capture_attempt_warning_again_at,
+    ]
+    attempts["limit"] = effective_limit
 
-        count = int(attempts.get("attempt_count", 0))
-        warning_stages = attempts["warning_stages"]
-        if count in warning_stages:
-            warning = True
+    count = int(attempts.get("attempt_count", 0))
+    warning_stages = attempts["warning_stages"]
+    if count in warning_stages:
+        warning = True
 
-        if count >= effective_limit:
-            terminal = True
-            tx_store.update_transaction_status(
-                internal_tx_id, TransactionStatus.ATTEMPT_LIMIT_EXCEEDED.value
-            )
+    if count >= effective_limit:
+        terminal = True
+        tx_store.update_transaction_status(
+            internal_tx_id, TransactionStatus.ATTEMPT_LIMIT_EXCEEDED.value
+        )
 
-        tx_store.write_json(internal_tx_id, ATTEMPTS_PATH, attempts)
+    tx_store.write_json(internal_tx_id, ATTEMPTS_PATH, attempts)
 
     return AttemptResult(
         attempt_count=count,

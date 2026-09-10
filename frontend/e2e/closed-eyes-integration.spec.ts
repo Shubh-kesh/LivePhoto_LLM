@@ -54,7 +54,8 @@ test('closed eye on integrated route -> quality retry -> EYES_CLOSED -> no revie
   expect(status.reason_codes).toContain('EYES_CLOSED')
   expect(status.status).toBe('RETRY_REQUIRED')
 
-  // Eyes open -> retry proceeds normally to Review (no panel requirement here).
+  // Eyes open -> retry proceeds normally: quality-eligible auto-processes straight to the
+  // processed-portrait review (no raw "Use photo" step).
   await page.evaluate(() => {
     ;(globalThis as { __LIVEPHOTO_EYE_STUB__?: unknown }).__LIVEPHOTO_EYE_STUB__ = {
       mode: 'open',
@@ -65,5 +66,7 @@ test('closed eye on integrated route -> quality retry -> EYES_CLOSED -> no revie
     timeout: 15_000,
   })
   await page.getByRole('button', { name: 'Capture photo' }).click()
-  await expect(page.getByRole('button', { name: 'Use photo' })).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByRole('button', { name: 'Submit photo' })).toBeVisible({
+    timeout: 60_000,
+  })
 })
