@@ -192,8 +192,8 @@ async def evaluate_liveness(
     # Short lock: cache/claim check (never hold the lock across the provider call).
     with store.lock_transaction(transaction_id):
         cached = liveness.read_evaluation(store, transaction_id, identity)
-        # Reuse a cached result ONLY when it matches the CURRENT evaluation contract; a legacy
-        # v1 / missing-subject_count record is re-evaluated once (never reused for PASS).
+        # Reuse a cached result ONLY when it matches the CURRENT evaluation contract; a legacy /
+        # missing-person-state record is re-evaluated once (never reused for PASS).
         if cached is not None and liveness.is_current_evaluation(cached):
             return _liveness_safe_response(cached)
         if liveness.is_evaluation_claimed(store, transaction_id, identity):
@@ -296,12 +296,16 @@ async def process_portrait(
             "no VLM result stored for this transaction",
         )
     vlm_result = store.read_json(transaction_id, vlm_relative)
-    # Single-person authoritative gate: portrait requires a LIVE result with exactly ONE visible
-    # person. MULTIPLE/ZERO/UNCERTAIN (or a missing subject_count) never enter portrait processing.
-    if vlm_result.get("classification") != "LIVE" or vlm_result.get("subject_count") != "ONE":
+    # The SAME authoritative person-state rule used by the browser flow: LIVE + a coherent,
+    # portrait-eligible pair (ONE+NONE or MULTIPLE+BACKGROUND). Contradictory pairs fail closed.
+    if not liveness.is_portrait_eligible_vlm_result(
+        vlm_result.get("classification"),
+        vlm_result.get("subject_count"),
+        vlm_result.get("secondary_person_state"),
+    ):
         raise PortraitProcessingError(
             PortraitErrorCode.PORTRAIT_PROCESSING_FAILED,
-            "portrait processing requires a LIVE single-person result",
+            "portrait processing requires a LIVE coherent non-interfering-person result",
         )
 
     return await _run_portrait_processing(request, transaction_id, face_box)

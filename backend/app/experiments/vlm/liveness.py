@@ -14,20 +14,20 @@ Security/idempotency invariants (pre-M6 hardening):
 - Provider evaluation is single-flight per identity: concurrent requests for the same capture share
   one provider call (claim file). Provider failures are cached per identity (fail closed).
 
-Classification + subject_count -> decision mapping (pre-M6):
-- LIVE + subject_count ONE -> PASS -> portrait allowed
-- LIVE + MULTIPLE         -> RETRY (reason MULTIPLE_FACES) -> portrait forbidden
-- LIVE + ZERO             -> RETRY (reason NO_FACE) -> portrait forbidden
-- LIVE + UNCERTAIN        -> RETRY -> portrait forbidden
-- SCREEN_REPLAY           -> FAIL (subject_count does not override FAIL)
-- PRINT_ATTACK            -> FAIL
-- QUALITY_FAILURE         -> RETRY
-- UNCERTAIN               -> RETRY
-- missing/invalid subject_count on a LIVE result -> fail closed (RETRY, no PASS; never default
-  to ONE)
+Classification + secondary_person_state -> decision mapping (pre-M6):
+- LIVE + secondary_person_state NONE/BACKGROUND       -> PASS -> portrait allowed
+- LIVE + secondary_person_state INTERFERING           -> RETRY (reason MULTIPLE_FACES)
+- LIVE + secondary_person_state UNCERTAIN/missing     -> RETRY -> portrait forbidden
+- LIVE + subject_count ZERO                           -> RETRY (reason NO_FACE)
+- SCREEN_REPLAY / PRINT_ATTACK                        -> FAIL (person state does not override)
+- QUALITY_FAILURE / UNCERTAIN                         -> RETRY
+- missing/invalid secondary_person_state on a LIVE result -> fail closed (RETRY; never default NONE)
 - provider/network/schema error -> no PASS, portrait forbidden (fail closed)
 
-Frontend MULTIPLE_FACES is an early UX check only; the authoritative VLM subject_count is the
+`subject_count` is retained for evidence/diagnostics but is NOT the authoritative multi-person
+blocker: a clearly distant/background second person (subject_count MULTIPLE + secondary_person_state
+BACKGROUND) must still PASS so portrait matting can remove the background person. Frontend
+MULTIPLE_FACES is an early UX check only; the authoritative VLM `secondary_person_state` is the
 defense-in-depth gate before any canonical PASS.
 """
 
@@ -43,17 +43,39 @@ from app.core.logging import get_logger
 from app.domain.decision import DecisionOutcome
 from app.experiments.vlm.service import ExperimentEvaluateRequest, VlmEvaluationService
 from app.providers.vision import PROMPT_VERSION, VLM_SCHEMA_VERSION
-from app.providers.vision.models import ImageInput, SubjectCount
+from app.providers.vision.models import ImageInput, SecondaryPersonState, SubjectCount
 from app.transactions import ArtifactType
 from app.transactions.decisions import read_decision
 from app.transactions.store import TransactionFileStore, TransactionStatus
 
 logger = get_logger("livephoto.liveness")
 
+#: Person-state pairs the model may legitimately produce. Any pair outside this set is
+#: contradictory (e.g. ONE + BACKGROUND) and fails closed. Never default/repair silently.
+COHERENT_PERSON_STATES: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("ZERO", "NONE"),
+        ("ONE", "NONE"),
+        ("MULTIPLE", "BACKGROUND"),
+        ("MULTIPLE", "INTERFERING"),
+        ("MULTIPLE", "UNCERTAIN"),
+        ("UNCERTAIN", "UNCERTAIN"),
+    }
+)
+
+#: Coherent pairs that may authorize a portrait (a single primary subject, or a distant
+#: non-interfering background person removable by matting).
+PORTRAIT_ELIGIBLE_PERSON_STATES: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("ONE", "NONE"),
+        ("MULTIPLE", "BACKGROUND"),
+    }
+)
+
 #: Stable policy/version identifiers for authoritative VLM decisions.
 LIVENESS_DECISION_SOURCE = "vlm"
-#: v2: canonical PASS now additionally requires subject_count == ONE.
-LIVENESS_DECISION_VERSION = "liveness-v2"
+#: v3: canonical PASS requires LIVE + a coherent, portrait-eligible person-state pair.
+LIVENESS_DECISION_VERSION = "liveness-v3"
 
 #: Transaction-relative paths.
 LIVENESS_RELATIVE_DIR = "liveness"
@@ -79,36 +101,69 @@ def liveness_identity(attempt_id: str | None, selected_sha256: str) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def map_classification_to_outcome(
-    classification: str | None, subject_count: str | None
-) -> DecisionOutcome:
-    """Map normalized VLM classification + subject_count to a decision outcome.
+def is_person_state_consistent(
+    subject_count: str | None, secondary_person_state: str | None
+) -> bool:
+    """True only for a coherent (subject_count, secondary_person_state) pair.
 
-    Canonical PASS is written ONLY for LIVE + subject_count ONE. Anything else (including a LIVE
-    result with a MULTIPLE/ZERO/UNCERTAIN/missing subject_count) fails closed to RETRY; never
-    default missing subject data to ONE.
+    ``subject_count`` and ``secondary_person_state`` are independent model outputs and can
+    contradict each other. Contradictory pairs (e.g. ONE + BACKGROUND) fail closed: they are never
+    repaired or defaulted.
+    """
+    if subject_count is None or secondary_person_state is None:
+        return False
+    return (subject_count, secondary_person_state) in COHERENT_PERSON_STATES
+
+
+def is_portrait_eligible_vlm_result(
+    classification: str | None,
+    subject_count: str | None,
+    secondary_person_state: str | None,
+) -> bool:
+    """THE single authoritative person-state rule (used at every authorization boundary).
+
+    Eligible for canonical PASS / portrait ONLY when:
+    - classification == LIVE, AND
+    - the person-state pair is coherent, AND
+    - the pair is portrait-eligible: ONE+NONE or MULTIPLE+BACKGROUND (distant background person).
+    """
+    if classification != "LIVE":
+        return False
+    if not is_person_state_consistent(subject_count, secondary_person_state):
+        return False
+    return (subject_count, secondary_person_state) in PORTRAIT_ELIGIBLE_PERSON_STATES
+
+
+def map_classification_to_outcome(
+    classification: str | None,
+    subject_count: str | None,
+    secondary_person_state: str | None,
+) -> DecisionOutcome:
+    """Map normalized VLM classification + person state to a decision outcome.
+
+    PASS uses the single authoritative ``is_portrait_eligible_vlm_result`` helper. Attacks FAIL
+    regardless of person state. Everything else fails closed to RETRY (never default missing or
+    contradictory person state).
     """
     if classification in ("SCREEN_REPLAY", "PRINT_ATTACK"):
-        # Subject count does not override an attack FAIL.
+        # Person state does not override an attack FAIL.
         return DecisionOutcome.FAIL
-    if classification != "LIVE":
-        # QUALITY_FAILURE, UNCERTAIN, provider/error conditions -> RETRY.
-        return DecisionOutcome.RETRY
-    if subject_count == "ONE":
+    if is_portrait_eligible_vlm_result(classification, subject_count, secondary_person_state):
         return DecisionOutcome.PASS
-    # LIVE with ZERO / MULTIPLE / UNCERTAIN / missing subject_count -> fail closed, no PASS.
     return DecisionOutcome.RETRY
 
 
-def subject_count_reasons(subject_count: str | None) -> list[str]:
-    """Safe retry reason codes derived from the normalized subject_count.
+def interference_reasons(
+    subject_count: str | None, secondary_person_state: str | None
+) -> list[str]:
+    """Safe retry reason codes derived from the normalized person state.
 
     Never raw VLM/model output; always the stable application reason vocabulary.
     """
-    if subject_count == "MULTIPLE":
-        return ["MULTIPLE_FACES"]
     if subject_count == "ZERO":
         return ["NO_FACE"]
+    if secondary_person_state == "INTERFERING":
+        return ["MULTIPLE_FACES"]
     return []
 
 
@@ -276,19 +331,20 @@ def evaluation_relative_path(identity: str) -> str:
     return f"{LIVENESS_RELATIVE_DIR}/{identity}.json"
 
 
-#: Valid normalized subject_count categories for the current schema.
+#: Valid normalized person categories for the current schema.
 VALID_SUBJECT_COUNTS: frozenset[str] = frozenset(c.value for c in SubjectCount)
+VALID_SECONDARY_STATES: frozenset[str] = frozenset(c.value for c in SecondaryPersonState)
 
 
 def is_current_evaluation(payload: dict[str, Any] | None) -> bool:
     """True only when a cached liveness record matches the CURRENT evaluation contract.
 
     A cached record may be reused for authoritative promotion only when it was produced under the
-    current schema/prompt contract with a valid ``subject_count``. Legacy records (``vlm-result-v1``
-    / ``vlm-passive-v1`` / missing-or-invalid ``subject_count``) MUST NOT be reused: callers
-    re-evaluate the same capture once with the current provider/schema instead. An old
-    ``outcome=PASS`` is never treated as current authorization and a missing ``subject_count`` is
-    never defaulted to ONE.
+    current schema/prompt contract with valid ``subject_count`` and ``secondary_person_state``.
+    Legacy records (older schema/prompt, missing/invalid ``subject_count`` or
+    ``secondary_person_state``) MUST NOT be reused: callers re-evaluate the same capture once with
+    the current provider/schema. An old ``outcome=PASS`` is never treated as current authorization
+    and a missing person state is never defaulted to NONE/BACKGROUND.
 
     Fail-closed error records are reusable (they never authorize PASS and preserve idempotent
     provider-error caching): a record with a truthy ``error`` is always fail-closed RETRY.
@@ -302,7 +358,14 @@ def is_current_evaluation(payload: dict[str, Any] | None) -> bool:
         return False
     if payload.get("prompt_version") != PROMPT_VERSION:
         return False
-    return payload.get("subject_count") in VALID_SUBJECT_COUNTS
+    subject_count = payload.get("subject_count")
+    secondary_person_state = payload.get("secondary_person_state")
+    if subject_count not in VALID_SUBJECT_COUNTS:
+        return False
+    if secondary_person_state not in VALID_SECONDARY_STATES:
+        return False
+    # The pair must be semantically coherent; an inconsistent v3 cache is never reused for PASS.
+    return is_person_state_consistent(subject_count, secondary_person_state)
 
 
 def read_evaluation(
@@ -394,7 +457,8 @@ async def evaluate_capture(
 
     classification = result.classification
     subject_count = result.subject_count
-    outcome = map_classification_to_outcome(classification, subject_count)
+    secondary_person_state = result.secondary_person_state
+    outcome = map_classification_to_outcome(classification, subject_count, secondary_person_state)
     return {
         "attempt_id": attempt_id,
         "selected_sha256": selected_sha256,
@@ -406,7 +470,8 @@ async def evaluate_capture(
         "attack_medium": result.attack_medium,
         "evidence_codes": list(result.evidence_codes),
         "subject_count": subject_count,
-        "reason_codes": subject_count_reasons(subject_count),
+        "secondary_person_state": secondary_person_state,
+        "reason_codes": interference_reasons(subject_count, secondary_person_state),
         "outcome": outcome.value,
         "portrait_allowed": portrait_allowed(outcome),
         "latency_ms": result.latency_ms,
@@ -435,6 +500,7 @@ def _error_payload(
         "attack_medium": None,
         "evidence_codes": [],
         "subject_count": None,
+        "secondary_person_state": None,
         "reason_codes": [],
         "outcome": DecisionOutcome.RETRY.value,
         "portrait_allowed": False,
@@ -465,10 +531,15 @@ def has_current_canonical_pass(store: TransactionFileStore, transaction_id: str)
         and meta.get("selected_sha256") == key["selected_sha256"]
         and meta.get("liveness_identity")
         == liveness_identity(key["attempt_id"], key["selected_sha256"])
-        # Defense in depth: a canonical PASS is bound to a CURRENT-schema, single-person
-        # authoritative result. Legacy decisions (no subject_count / v1 schema) never authorize.
-        and meta.get("subject_count") == "ONE"
+        # Defense in depth: the decision must carry the CURRENT schema and a COHERENT,
+        # portrait-eligible person-state pair (same rule as live promotion). Legacy or
+        # contradictory metadata (e.g. ZERO+NONE, MULTIPLE+INTERFERING) never authorizes.
         and meta.get("schema_version") == VLM_SCHEMA_VERSION
+        and is_portrait_eligible_vlm_result(
+            meta.get("classification"),
+            meta.get("subject_count"),
+            meta.get("secondary_person_state"),
+        )
     )
 
 
@@ -481,6 +552,7 @@ def decision_metadata_for(evaluation: dict[str, Any], *, identity: str) -> dict[
         "model": evaluation.get("model"),
         "classification": evaluation.get("classification"),
         "subject_count": evaluation.get("subject_count"),
+        "secondary_person_state": evaluation.get("secondary_person_state"),
         "prompt_version": evaluation.get("prompt_version"),
         "schema_version": evaluation.get("schema_version"),
     }
@@ -625,6 +697,7 @@ def persist_normalized_vlm_result(
                 "self_reported_confidence": None,
                 "evidence_codes": list(evaluation.get("evidence_codes", [])),
                 "subject_count": evaluation.get("subject_count"),
+                "secondary_person_state": evaluation.get("secondary_person_state"),
                 "latency_ms": evaluation.get("latency_ms"),
                 "request_id": request_id,
                 "prompt_version": evaluation.get("prompt_version"),
