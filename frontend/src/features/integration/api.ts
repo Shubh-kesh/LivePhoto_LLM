@@ -64,10 +64,17 @@ export async function browserLiveness(): Promise<{
   classification: string | null
   outcome: string
   portrait_allowed: boolean
+  /** Safe retry reason codes (e.g. MULTIPLE_FACES), never raw VLM/provider output. */
+  reason_codes?: string[]
 }> {
   const form = new FormData()
   const data: unknown = await apiPostMultipart('/api/v1/browser/liveness', form, 60_000)
-  return data as { classification: string | null; outcome: string; portrait_allowed: boolean }
+  return data as {
+    classification: string | null
+    outcome: string
+    portrait_allowed: boolean
+    reason_codes?: string[]
+  }
 }
 
 /** Trigger backend portrait processing (requires canonical PASS). */

@@ -46,7 +46,9 @@ def _create_transaction(client: TestClient) -> str:
     return response.json()["transaction_id"]
 
 
-def _persist_vlm(client: TestClient, transaction_id: str, classification: str) -> None:
+def _persist_vlm(
+    client: TestClient, transaction_id: str, classification: str, subject_count: str = "ONE"
+) -> None:
     store: TransactionFileStore = client.app.state.transaction_store
     import json as _json
 
@@ -63,6 +65,7 @@ def _persist_vlm(client: TestClient, transaction_id: str, classification: str) -
                 "attack_medium": "NONE",
                 "self_reported_confidence": 0.9,
                 "evidence_codes": [],
+                "subject_count": subject_count,
                 "latency_ms": 1,
                 "experiment_id": "e" * 32,
                 "request_id": "r" * 32,
@@ -103,6 +106,7 @@ def test_vlm_result_persisted_on_evaluate(tmp_path) -> None:
     store: TransactionFileStore = app.state.transaction_store
     result = store.read_json(tx_id, "vlm/result.json")
     assert result["classification"] == "LIVE"
+    assert result["subject_count"] == "ONE"
     assert store.read_transaction_json(tx_id)["status"] == "VLM_EVALUATED"
 
 

@@ -127,7 +127,7 @@ const retryReasonCopy: Partial<Record<QualityReasonCode, RetryCopy>> = {
   },
   MULTIPLE_FACES: {
     title: 'Make sure only one person is visible.',
-    body: 'Only one face should be in the photo.',
+    body: 'Move to a place where no one else is in the photo.',
   },
   FACE_TOO_SMALL: {
     title: 'Move a little closer to the camera.',
@@ -200,6 +200,24 @@ export function retryCopyForReasonCodes(reasonCodes: readonly QualityReasonCode[
 
 export function internalRetryCopy(): RetryCopy {
   return { title: captureCopy.qualityRetry.unknown, body: captureCopy.qualityRetry.generic }
+}
+
+/**
+ * Safe customer message for a backend-authoritative liveness RETRY (e.g. MULTIPLE_FACES from the
+ * single-person gate). Maps stable reason codes to existing copy; never exposes VLM/provider/model
+ * output, confidence or prompt.
+ */
+export function livenessRetryMessage(reasonCodes: readonly string[] | undefined): string {
+  const codes = reasonCodes ?? []
+  if (codes.includes('MULTIPLE_FACES')) {
+    const copy = retryReasonCopy.MULTIPLE_FACES ?? internalRetryCopy()
+    return `${copy.title} ${copy.body}`
+  }
+  if (codes.includes('NO_FACE')) {
+    const copy = retryReasonCopy.NO_FACE ?? internalRetryCopy()
+    return copy.title
+  }
+  return "We couldn't use this photo. Please try again."
 }
 
 export interface ErrorCopy {

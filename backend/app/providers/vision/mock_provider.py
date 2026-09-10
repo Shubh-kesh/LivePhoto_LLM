@@ -2,8 +2,14 @@
 
 Used for tests and the E2E mock backend. No network. Behavior is driven by
 ``request.provider_options["mock_behavior"]``:
-default | live | print | uncertain | quality_failure | timeout | auth | schema | response_error.
-Only ever active when provider == "mock" (never reachable from a real provider path).
+default | live | screen_replay | print | uncertain | quality_failure | timeout | auth | schema |
+response_error | live_multiple | live_zero | live_subject_uncertain.
+
+``live_multiple`` / ``live_zero`` / ``live_subject_uncertain`` combine classification LIVE with a
+subject_count of MULTIPLE / ZERO / UNCERTAIN for deterministic single-person-enforcement tests.
+``request.provider_options["mock_subject_count"]`` (e.g. "MULTIPLE") overrides the subject_count
+for any behavior. Only ever active when provider == "mock" (never reachable from a real provider
+path).
 """
 
 from __future__ import annotations
@@ -21,6 +27,7 @@ from app.providers.vision.errors import VlmError, VlmErrorCode
 from app.providers.vision.models import (
     AttackMedium,
     EvidenceCode,
+    SubjectCount,
     VisionEvaluationRequest,
     VisionEvaluationResponse,
     VlmAssessment,
@@ -70,6 +77,15 @@ class MockVisionProvider(VisionProvider):
             raise VlmError(VlmErrorCode.PROVIDER_RESPONSE_ERROR, "mock malformed response")
 
         assessment = _assessment_for(behavior)
+        override = request.provider_options.get("mock_subject_count")
+        if override:
+            try:
+                assessment = assessment.model_copy(update={"subject_count": SubjectCount(override)})
+            except ValueError as exc:  # pragma: no cover - test misuse
+                raise VlmError(
+                    VlmErrorCode.PROVIDER_BAD_REQUEST,
+                    f"invalid mock_subject_count '{override}'",
+                ) from exc
         return VisionEvaluationResponse(
             assessment=assessment,
             provider="mock",
@@ -90,50 +106,80 @@ class MockVisionProvider(VisionProvider):
 
 
 def _assessment_for(behavior: str) -> VlmAssessment:
-    mapping: dict[str, tuple[VlmClassification, AttackMedium, float, list[EvidenceCode]]] = {
+    mapping: dict[
+        str, tuple[VlmClassification, AttackMedium, float, list[EvidenceCode], SubjectCount]
+    ] = {
         "default": (
             VlmClassification.SCREEN_REPLAY,
             AttackMedium.UNKNOWN,
             0.87,
             [EvidenceCode.DEVICE_BORDER_VISIBLE, EvidenceCode.DISPLAY_REFLECTION],
+            SubjectCount.ONE,
         ),
         "screen_replay": (
             VlmClassification.SCREEN_REPLAY,
             AttackMedium.MOBILE_SCREEN,
             0.86,
             [EvidenceCode.DEVICE_BORDER_VISIBLE],
+            SubjectCount.ONE,
         ),
         "live": (
             VlmClassification.LIVE,
             AttackMedium.NONE,
             0.95,
             [EvidenceCode.ENVIRONMENT_CONSISTENT_WITH_LIVE],
+            SubjectCount.ONE,
+        ),
+        "live_multiple": (
+            VlmClassification.LIVE,
+            AttackMedium.NONE,
+            0.95,
+            [EvidenceCode.ENVIRONMENT_CONSISTENT_WITH_LIVE],
+            SubjectCount.MULTIPLE,
+        ),
+        "live_zero": (
+            VlmClassification.LIVE,
+            AttackMedium.NONE,
+            0.95,
+            [EvidenceCode.ENVIRONMENT_CONSISTENT_WITH_LIVE],
+            SubjectCount.ZERO,
+        ),
+        "live_subject_uncertain": (
+            VlmClassification.LIVE,
+            AttackMedium.NONE,
+            0.95,
+            [EvidenceCode.ENVIRONMENT_CONSISTENT_WITH_LIVE],
+            SubjectCount.UNCERTAIN,
         ),
         "print": (
             VlmClassification.PRINT_ATTACK,
             AttackMedium.PRINT_PHOTO,
             0.82,
             [EvidenceCode.PAPER_TEXTURE, EvidenceCode.PRINT_HALFTONE_PATTERN],
+            SubjectCount.ONE,
         ),
         "uncertain": (
             VlmClassification.UNCERTAIN,
             AttackMedium.UNKNOWN,
             0.4,
             [EvidenceCode.INSUFFICIENT_VISUAL_EVIDENCE],
+            SubjectCount.UNCERTAIN,
         ),
         "quality_failure": (
             VlmClassification.QUALITY_FAILURE,
             AttackMedium.NONE,
             0.9,
             [EvidenceCode.INSUFFICIENT_VISUAL_EVIDENCE],
+            SubjectCount.UNCERTAIN,
         ),
     }
-    classification, medium, confidence, codes = mapping[behavior]
+    classification, medium, confidence, codes, subject_count = mapping[behavior]
     return VlmAssessment(
         classification=classification,
         attack_medium=medium,
         self_reported_confidence=confidence,
         evidence_codes=codes,
+        subject_count=subject_count,
     )
 
 

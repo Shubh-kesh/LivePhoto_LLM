@@ -293,3 +293,33 @@ sampling settings, `schema_version`, timestamp). Historical reproducibility is a
 Bands are conceptual targets to be re-baselined with real measurements (M5/M14/M19). Numbers are
 deliberately not "unrealistically strict". VLM timeout must be short enough that a VLM stall cannot
 push the end-to-end decision past the cap while preserving fail-safe semantics.
+
+## 14. Single-person enforcement (subject_count) — pre-M6
+
+Final accepted LivePhoto captures must contain exactly **ONE meaningful visible person/face**.
+
+**Layering (defense-in-depth):**
+
+- **Frontend** `MULTIPLE_FACES` local quality check = early UX / cost optimization. It rejects
+  obviously multi-person captures before upload and never authorizes anything.
+- **Backend** authoritative VLM `subject_count` (ZERO | ONE | MULTIPLE | UNCERTAIN) = mandatory
+  enforcement **before** any canonical PASS. Browser-supplied face counts are never trusted.
+
+**Rule (authoritative promotion):** canonical `PASS` is written ONLY when the backend VLM says
+`classification == LIVE` **AND** `subject_count == ONE`. Otherwise the outcome is `RETRY` (with
+safe reason codes `MULTIPLE_FACES` / `NO_FACE` where applicable) and `portrait_allowed` is false.
+`LIVE` + `MULTIPLE` / `ZERO` / `UNCERTAIN` / missing `subject_count` NEVER produces PASS. Missing
+data is never defaulted to ONE.
+
+**Why this is needed:** MODNet portrait matting is not person-instance segmentation. When two
+people's bodies/shoulders overlap or touch, MODNet can preserve both in the foreground matte.
+Without the backend subject gate, a multiple-person capture could reach portrait processing.
+`MULTIPLE` is a **capture-quality failure → RETRY**, never a fraud finding.
+
+**Customer surface:** the backend exposes only safe reason codes (`MULTIPLE_FACES`) — never VLM,
+Groq, model output, confidence, or prompt. The frontend maps `MULTIPLE_FACES` to
+"Make sure only one person is visible. / Move to a place where no one else is in the photo."
+
+**Enforcement points:** `/api/v1/browser/liveness` (canonical decision + portrait gate),
+`/api/v1/browser/portrait`, `/api/v1/browser/submit` (via current-PASS binding), and the standalone
+`/api/v1/transactions/{id}/portrait` (requires a persisted LIVE + ONE VLM result).

@@ -10,7 +10,9 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
-VLM_SCHEMA_VERSION = "vlm-result-v1"
+#: Bumped to v2 when ``subject_count`` was added to the normalized schema (pre-M6 single-person
+#: enforcement). Immutable per version.
+VLM_SCHEMA_VERSION = "vlm-result-v2"
 
 
 class VlmClassification(StrEnum):
@@ -18,6 +20,21 @@ class VlmClassification(StrEnum):
     SCREEN_REPLAY = "SCREEN_REPLAY"
     PRINT_ATTACK = "PRINT_ATTACK"
     QUALITY_FAILURE = "QUALITY_FAILURE"
+    UNCERTAIN = "UNCERTAIN"
+
+
+class SubjectCount(StrEnum):
+    """Category of how many meaningful visible persons/faces are in the capture.
+
+    A semantic category rather than a raw, hallucination-prone integer (pre-M6 single-person
+    enforcement). ``MULTIPLE`` includes a second person anywhere in the frame — beside, behind,
+    near the edge, or overlapping/touching the primary person. Tiny ambiguous shapes must not be
+    classified as MULTIPLE.
+    """
+
+    ZERO = "ZERO"
+    ONE = "ONE"
+    MULTIPLE = "MULTIPLE"
     UNCERTAIN = "UNCERTAIN"
 
 
@@ -67,6 +84,9 @@ class VlmAssessment(BaseModel):
     attack_medium: AttackMedium = AttackMedium.NONE
     self_reported_confidence: float = Field(ge=0.0, le=1.0)
     evidence_codes: list[str] = Field(default_factory=list, max_length=20)
+    #: REQUIRED: a missing/invalid subject_count is a schema failure (fail closed). Never defaulted
+    #: to ONE.
+    subject_count: SubjectCount
 
 
 class TokenUsage(BaseModel):

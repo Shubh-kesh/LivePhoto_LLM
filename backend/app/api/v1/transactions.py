@@ -192,7 +192,9 @@ async def evaluate_liveness(
     # Short lock: cache/claim check (never hold the lock across the provider call).
     with store.lock_transaction(transaction_id):
         cached = liveness.read_evaluation(store, transaction_id, identity)
-        if cached is not None:
+        # Reuse a cached result ONLY when it matches the CURRENT evaluation contract; a legacy
+        # v1 / missing-subject_count record is re-evaluated once (never reused for PASS).
+        if cached is not None and liveness.is_current_evaluation(cached):
             return _liveness_safe_response(cached)
         if liveness.is_evaluation_claimed(store, transaction_id, identity):
             if liveness.evaluation_claim_ready(store, transaction_id, identity, settings):
@@ -270,6 +272,7 @@ def _liveness_safe_response(evaluation: dict[str, Any]) -> dict[str, Any]:
         "classification": evaluation.get("classification"),
         "outcome": evaluation.get("outcome"),
         "portrait_allowed": evaluation.get("portrait_allowed", False),
+        "reason_codes": list(evaluation.get("reason_codes", [])),
     }
 
 
@@ -293,10 +296,12 @@ async def process_portrait(
             "no VLM result stored for this transaction",
         )
     vlm_result = store.read_json(transaction_id, vlm_relative)
-    if vlm_result.get("classification") != "LIVE":
+    # Single-person authoritative gate: portrait requires a LIVE result with exactly ONE visible
+    # person. MULTIPLE/ZERO/UNCERTAIN (or a missing subject_count) never enter portrait processing.
+    if vlm_result.get("classification") != "LIVE" or vlm_result.get("subject_count") != "ONE":
         raise PortraitProcessingError(
             PortraitErrorCode.PORTRAIT_PROCESSING_FAILED,
-            "portrait processing requires a LIVE experimental result",
+            "portrait processing requires a LIVE single-person result",
         )
 
     return await _run_portrait_processing(request, transaction_id, face_box)

@@ -35,6 +35,7 @@ import {
 import type { CaptureBundle } from './types/capture'
 import type { FaceDetectorProvider } from './quality/face/FaceDetectorProvider'
 import type { BundleQualityAssessment } from './quality/types/quality'
+import { livenessRetryMessage } from './copy'
 import { Button, StatusMessage } from '../../design-system'
 import { readRuntimeConfig } from '../../lib/runtimeConfig'
 import { captureConfig } from './config/captureConfig'
@@ -132,7 +133,12 @@ export function CapturePage({
       )
       // Server-authoritative liveness: the backend evaluates the stored capture with the configured
       // provider (VLM_PROVIDER) and persists a normalized result. The browser never decides LIVE.
-      let liveness: { classification: string | null; outcome: string; portrait_allowed: boolean }
+      let liveness: {
+        classification: string | null
+        outcome: string
+        portrait_allowed: boolean
+        reason_codes?: string[]
+      }
       try {
         liveness = await evaluateTransactionLiveness(created.transactionId)
       } catch {
@@ -141,8 +147,9 @@ export function CapturePage({
         return
       }
       if (!liveness.portrait_allowed) {
-        // Non-LIVE / spoof / retry outcome: the backend keeps the portrait endpoint LIVE-gated.
-        setStandaloneError("We couldn't use this photo. Please try again.")
+        // Non-LIVE / spoof / multiple-person / retry outcome: the backend keeps the portrait
+        // endpoint LIVE + single-person gated. Show the safe mapped reason when available.
+        setStandaloneError(livenessRetryMessage(liveness.reason_codes))
         return
       }
       // Backend-confirmed LIVE -> the LIVE-gated experiment portrait endpoint may proceed.

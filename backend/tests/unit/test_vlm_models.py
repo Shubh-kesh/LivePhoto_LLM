@@ -21,6 +21,7 @@ def test_assessment_accepts_valid_live_result() -> None:
         attack_medium=AttackMedium.NONE,
         self_reported_confidence=0.95,
         evidence_codes=[EvidenceCode.ENVIRONMENT_CONSISTENT_WITH_LIVE],
+        subject_count="ONE",
     )
     assert assessment.classification is VlmClassification.LIVE
     assert assessment.self_reported_confidence == 0.95
@@ -66,6 +67,7 @@ def test_assessment_retains_unknown_evidence_codes() -> None:
             "attack_medium": "NONE",
             "self_reported_confidence": 0.9,
             "evidence_codes": ["BLANK_FRAME", "NO_FACE_DETECTED"],
+            "subject_count": "ONE",
         }
     )
     assert assessment.evidence_codes == ["BLANK_FRAME", "NO_FACE_DETECTED"]
@@ -86,10 +88,12 @@ def test_assessment_rejects_excessive_evidence_codes() -> None:
 def test_parse_assessment_validates_strictly() -> None:
     text = (
         '{"classification": "SCREEN_REPLAY", "attack_medium": "MOBILE_SCREEN", '
-        '"self_reported_confidence": 0.86, "evidence_codes": ["DEVICE_BORDER_VISIBLE"]}'
+        '"self_reported_confidence": 0.86, "evidence_codes": ["DEVICE_BORDER_VISIBLE"], '
+        '"subject_count": "ONE"}'
     )
     assessment = parse_assessment(text)
     assert assessment.classification is VlmClassification.SCREEN_REPLAY
+    assert assessment.subject_count.value == "ONE"
 
 
 def test_parse_assessment_invalid_json_raises_schema_error() -> None:
@@ -110,8 +114,19 @@ def test_parse_assessment_handles_code_fence_wrapper() -> None:
     text = (
         "```json\n"
         '{"classification": "PRINT_ATTACK", "attack_medium": "PRINT_PHOTO", '
-        '"self_reported_confidence": 0.8, "evidence_codes": ["PAPER_TEXTURE"]}\n'
+        '"self_reported_confidence": 0.8, "evidence_codes": ["PAPER_TEXTURE"], '
+        '"subject_count": "ONE"}\n'
         "```"
     )
     assessment = parse_assessment(text)
     assert assessment.classification is VlmClassification.PRINT_ATTACK
+
+
+def test_parse_assessment_missing_subject_count_is_schema_failure() -> None:
+    # A LIVE result WITHOUT subject_count must fail closed at the schema boundary, never default.
+    with pytest.raises(VlmError) as exc:
+        parse_assessment(
+            '{"classification": "LIVE", "attack_medium": "NONE", '
+            '"self_reported_confidence": 0.9, "evidence_codes": []}'
+        )
+    assert exc.value.code is VlmErrorCode.SCHEMA_VALIDATION_ERROR

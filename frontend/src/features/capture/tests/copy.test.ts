@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { errorCopyFor, retryCopyForReasonCodes } from '../copy'
+import { errorCopyFor, livenessRetryMessage, retryCopyForReasonCodes } from '../copy'
 import { CameraError } from '../media/mediaErrors'
 import { QualityError } from '../quality/errors'
 
@@ -30,6 +30,24 @@ describe('retryCopyForReasonCodes', () => {
     const copy = retryCopyForReasonCodes(['QUALITY_ANALYSIS_ERROR'])
     expect(copy.title).toContain("Let's try that photo again")
     expect(JSON.stringify(copy)).not.toMatch(/QUALITY_ANALYSIS_ERROR|NO_FACE/)
+  })
+})
+
+describe('livenessRetryMessage (backend single-person gate)', () => {
+  it('maps MULTIPLE_FACES to the single-person copy', () => {
+    expect(livenessRetryMessage(['MULTIPLE_FACES'])).toBe(
+      'Make sure only one person is visible. Move to a place where no one else is in the photo.',
+    )
+  })
+
+  it('maps NO_FACE to the no-face copy', () => {
+    expect(livenessRetryMessage(['NO_FACE'])).toBe("We couldn't see your face clearly.")
+  })
+
+  it('falls back to a safe generic message and never exposes technical detail', () => {
+    const message = livenessRetryMessage(undefined)
+    expect(message).toBe("We couldn't use this photo. Please try again.")
+    expect(message).not.toMatch(/vlm|groq|confidence|provider|model/i)
   })
 })
 

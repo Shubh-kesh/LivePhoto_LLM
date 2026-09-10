@@ -198,6 +198,7 @@ async def _persist_vlm_result(
         "attack_medium": result.attack_medium,
         "self_reported_confidence": result.self_reported_confidence,
         "evidence_codes": list(result.evidence_codes),
+        "subject_count": result.subject_count,
         "latency_ms": result.latency_ms,
         "experiment_id": result.experiment_id,
         "request_id": request.scope.get("request_id", ""),

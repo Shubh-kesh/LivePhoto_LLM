@@ -780,3 +780,44 @@ spoofable and never affects liveness/PASS/portrait/fraud/callback security.
 
 **Status:** Implemented (provisional minima; physical UAT browser/device validation still required
 to certify final versions).
+
+---
+
+## 21. Backend single-person (subject_count) enforcement
+
+**Milestone:** pre-M6
+**Type:** Feature / Security hardening (defense-in-depth)
+**Why:** Real captures with two people (side-by-side, second face behind a shoulder, touching
+bodies, second person near the frame edge) could reach portrait processing because MODNet portrait
+matting is not person-instance segmentation — overlapping/touching people can both be preserved in
+the matte. A multiple-person capture is a **capture-quality failure → RETRY**, not fraud.
+
+**Authoritative rule:** canonical PASS is written ONLY when the backend VLM returns
+`classification == LIVE` AND `subject_count == ONE`. `LIVE` + `MULTIPLE`/`ZERO`/`UNCERTAIN`/missing
+`subject_count` -> RETRY, `portrait_allowed=false`, no PASS. Missing data is never defaulted to ONE.
+
+**Enforcement points:**
+- `POST /api/v1/browser/liveness` — writes a RETRY decision (never PASS) for MULTIPLE.
+- `POST /api/v1/browser/portrait` and `POST /api/v1/browser/submit` — blocked by the current-PASS
+  binding (no PASS exists after MULTIPLE).
+- Standalone `POST /api/v1/transactions/{id}/portrait` — requires a persisted LIVE + ONE result
+  (`vlm/result.json`), so MULTIPLE/UNCERTAIN never enter portrait processing even though the
+  classification field is LIVE.
+
+**Customer surface:** safe reason code `MULTIPLE_FACES` only; frontend maps it to "Make sure only
+one person is visible." VLM/Groq/model/confidence/prompt are never exposed.
+
+**Persistence:** `subject_count` is stored in `liveness/<identity>.json`, `vlm/result.json` and the
+canonical decision metadata, bound to the same attempt_id / selected_sha256 / liveness_identity.
+
+**Schema/version:** the normalized VLM schema is now `vlm-result-v2` with a REQUIRED
+`subject_count`; a missing/invalid value is a schema failure (fail closed). Prompt is
+`vlm-passive-v2` and instructs the model to inspect the whole image (sides, background, partially
+occluded areas) and never to ignore a second person merely because the primary subject is dominant.
+
+**Deterministic test behaviors (mock provider, local/test/dev only):**
+`live` (ONE) | `live_multiple` | `live_zero` | `live_subject_uncertain` | plus
+`mock_subject_count` provider override.
+
+**Status:** Implemented (authoritative backend gate); accuracy on real multi-person captures is
+validated only by the manual mobile/laptop test plan, not by synthetic tests.

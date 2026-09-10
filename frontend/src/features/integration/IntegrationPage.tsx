@@ -19,6 +19,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { Button, ScreenLayout, StatusMessage } from '../../design-system'
 import { CapturePage } from '../capture/CapturePage'
+import { livenessRetryMessage } from '../capture/copy'
 import type { CaptureAttempt, UseCaptureFlowResult } from '../capture/hooks/useCaptureFlow'
 import {
   allowlistedAttemptReason,
@@ -138,7 +139,12 @@ export function IntegrationPage() {
       // Server-authoritative liveness: the backend evaluates the stored image with the configured
       // provider (VLM_PROVIDER); the browser never chooses the provider and never writes PASS.
       // Portrait proceeds ONLY when the backend confirms LIVE (canonical PASS). No test-PASS writer.
-      let liveness: { classification: string | null; outcome: string; portrait_allowed: boolean }
+      let liveness: {
+        classification: string | null
+        outcome: string
+        portrait_allowed: boolean
+        reason_codes?: string[]
+      }
       try {
         liveness = await browserLiveness()
       } catch {
@@ -147,8 +153,9 @@ export function IntegrationPage() {
         return
       }
       if (!liveness.portrait_allowed) {
-        // Non-LIVE / spoof / retry outcome: no portrait, no Submit. Safe retry.
-        setCaptureError("We couldn't use this photo. Please try again.")
+        // Non-LIVE / spoof / multiple-person / retry outcome: no portrait, no Submit. Safe retry
+        // with a customer-facing reason (e.g. MULTIPLE_FACES) when the backend provides one.
+        setCaptureError(livenessRetryMessage(liveness.reason_codes))
         return
       }
       await triggerPortrait()

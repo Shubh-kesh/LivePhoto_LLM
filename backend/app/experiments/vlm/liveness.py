@@ -14,13 +14,21 @@ Security/idempotency invariants (pre-M6 hardening):
 - Provider evaluation is single-flight per identity: concurrent requests for the same capture share
   one provider call (claim file). Provider failures are cached per identity (fail closed).
 
-Classification -> decision mapping (pre-M6):
-- LIVE              -> PASS  -> portrait allowed
-- SCREEN_REPLAY     -> FAIL
-- PRINT_ATTACK      -> FAIL
-- QUALITY_FAILURE   -> RETRY
-- UNCERTAIN         -> RETRY
+Classification + subject_count -> decision mapping (pre-M6):
+- LIVE + subject_count ONE -> PASS -> portrait allowed
+- LIVE + MULTIPLE         -> RETRY (reason MULTIPLE_FACES) -> portrait forbidden
+- LIVE + ZERO             -> RETRY (reason NO_FACE) -> portrait forbidden
+- LIVE + UNCERTAIN        -> RETRY -> portrait forbidden
+- SCREEN_REPLAY           -> FAIL (subject_count does not override FAIL)
+- PRINT_ATTACK            -> FAIL
+- QUALITY_FAILURE         -> RETRY
+- UNCERTAIN               -> RETRY
+- missing/invalid subject_count on a LIVE result -> fail closed (RETRY, no PASS; never default
+  to ONE)
 - provider/network/schema error -> no PASS, portrait forbidden (fail closed)
+
+Frontend MULTIPLE_FACES is an early UX check only; the authoritative VLM subject_count is the
+defense-in-depth gate before any canonical PASS.
 """
 
 from __future__ import annotations
@@ -34,7 +42,8 @@ from app.core.config import Settings
 from app.core.logging import get_logger
 from app.domain.decision import DecisionOutcome
 from app.experiments.vlm.service import ExperimentEvaluateRequest, VlmEvaluationService
-from app.providers.vision.models import ImageInput
+from app.providers.vision import PROMPT_VERSION, VLM_SCHEMA_VERSION
+from app.providers.vision.models import ImageInput, SubjectCount
 from app.transactions import ArtifactType
 from app.transactions.decisions import read_decision
 from app.transactions.store import TransactionFileStore, TransactionStatus
@@ -43,7 +52,8 @@ logger = get_logger("livephoto.liveness")
 
 #: Stable policy/version identifiers for authoritative VLM decisions.
 LIVENESS_DECISION_SOURCE = "vlm"
-LIVENESS_DECISION_VERSION = "liveness-v1"
+#: v2: canonical PASS now additionally requires subject_count == ONE.
+LIVENESS_DECISION_VERSION = "liveness-v2"
 
 #: Transaction-relative paths.
 LIVENESS_RELATIVE_DIR = "liveness"
@@ -69,14 +79,37 @@ def liveness_identity(attempt_id: str | None, selected_sha256: str) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def map_classification_to_outcome(classification: str | None) -> DecisionOutcome:
-    """Map a normalized VLM classification (or None on provider error) to a decision outcome."""
-    if classification == "LIVE":
-        return DecisionOutcome.PASS
+def map_classification_to_outcome(
+    classification: str | None, subject_count: str | None
+) -> DecisionOutcome:
+    """Map normalized VLM classification + subject_count to a decision outcome.
+
+    Canonical PASS is written ONLY for LIVE + subject_count ONE. Anything else (including a LIVE
+    result with a MULTIPLE/ZERO/UNCERTAIN/missing subject_count) fails closed to RETRY; never
+    default missing subject data to ONE.
+    """
     if classification in ("SCREEN_REPLAY", "PRINT_ATTACK"):
+        # Subject count does not override an attack FAIL.
         return DecisionOutcome.FAIL
-    # QUALITY_FAILURE, UNCERTAIN, or any provider/error condition -> RETRY, fail closed.
+    if classification != "LIVE":
+        # QUALITY_FAILURE, UNCERTAIN, provider/error conditions -> RETRY.
+        return DecisionOutcome.RETRY
+    if subject_count == "ONE":
+        return DecisionOutcome.PASS
+    # LIVE with ZERO / MULTIPLE / UNCERTAIN / missing subject_count -> fail closed, no PASS.
     return DecisionOutcome.RETRY
+
+
+def subject_count_reasons(subject_count: str | None) -> list[str]:
+    """Safe retry reason codes derived from the normalized subject_count.
+
+    Never raw VLM/model output; always the stable application reason vocabulary.
+    """
+    if subject_count == "MULTIPLE":
+        return ["MULTIPLE_FACES"]
+    if subject_count == "ZERO":
+        return ["NO_FACE"]
+    return []
 
 
 def portrait_allowed(outcome: DecisionOutcome) -> bool:
@@ -243,6 +276,35 @@ def evaluation_relative_path(identity: str) -> str:
     return f"{LIVENESS_RELATIVE_DIR}/{identity}.json"
 
 
+#: Valid normalized subject_count categories for the current schema.
+VALID_SUBJECT_COUNTS: frozenset[str] = frozenset(c.value for c in SubjectCount)
+
+
+def is_current_evaluation(payload: dict[str, Any] | None) -> bool:
+    """True only when a cached liveness record matches the CURRENT evaluation contract.
+
+    A cached record may be reused for authoritative promotion only when it was produced under the
+    current schema/prompt contract with a valid ``subject_count``. Legacy records (``vlm-result-v1``
+    / ``vlm-passive-v1`` / missing-or-invalid ``subject_count``) MUST NOT be reused: callers
+    re-evaluate the same capture once with the current provider/schema instead. An old
+    ``outcome=PASS`` is never treated as current authorization and a missing ``subject_count`` is
+    never defaulted to ONE.
+
+    Fail-closed error records are reusable (they never authorize PASS and preserve idempotent
+    provider-error caching): a record with a truthy ``error`` is always fail-closed RETRY.
+    """
+    if payload is None:
+        return False
+    # Fail-closed provider/error records: reusable (never PASS), preserves error-cache idempotency.
+    if payload.get("error"):
+        return True
+    if payload.get("schema_version") != VLM_SCHEMA_VERSION:
+        return False
+    if payload.get("prompt_version") != PROMPT_VERSION:
+        return False
+    return payload.get("subject_count") in VALID_SUBJECT_COUNTS
+
+
 def read_evaluation(
     store: TransactionFileStore, transaction_id: str, identity: str
 ) -> dict[str, Any] | None:
@@ -331,7 +393,8 @@ async def evaluate_capture(
         )
 
     classification = result.classification
-    outcome = map_classification_to_outcome(classification)
+    subject_count = result.subject_count
+    outcome = map_classification_to_outcome(classification, subject_count)
     return {
         "attempt_id": attempt_id,
         "selected_sha256": selected_sha256,
@@ -342,6 +405,8 @@ async def evaluate_capture(
         "classification": classification,
         "attack_medium": result.attack_medium,
         "evidence_codes": list(result.evidence_codes),
+        "subject_count": subject_count,
+        "reason_codes": subject_count_reasons(subject_count),
         "outcome": outcome.value,
         "portrait_allowed": portrait_allowed(outcome),
         "latency_ms": result.latency_ms,
@@ -369,6 +434,8 @@ def _error_payload(
         "classification": None,
         "attack_medium": None,
         "evidence_codes": [],
+        "subject_count": None,
+        "reason_codes": [],
         "outcome": DecisionOutcome.RETRY.value,
         "portrait_allowed": False,
         "latency_ms": None,
@@ -398,6 +465,10 @@ def has_current_canonical_pass(store: TransactionFileStore, transaction_id: str)
         and meta.get("selected_sha256") == key["selected_sha256"]
         and meta.get("liveness_identity")
         == liveness_identity(key["attempt_id"], key["selected_sha256"])
+        # Defense in depth: a canonical PASS is bound to a CURRENT-schema, single-person
+        # authoritative result. Legacy decisions (no subject_count / v1 schema) never authorize.
+        and meta.get("subject_count") == "ONE"
+        and meta.get("schema_version") == VLM_SCHEMA_VERSION
     )
 
 
@@ -409,6 +480,7 @@ def decision_metadata_for(evaluation: dict[str, Any], *, identity: str) -> dict[
         "provider": evaluation.get("provider"),
         "model": evaluation.get("model"),
         "classification": evaluation.get("classification"),
+        "subject_count": evaluation.get("subject_count"),
         "prompt_version": evaluation.get("prompt_version"),
         "schema_version": evaluation.get("schema_version"),
     }
@@ -552,6 +624,7 @@ def persist_normalized_vlm_result(
                 "attack_medium": evaluation.get("attack_medium"),
                 "self_reported_confidence": None,
                 "evidence_codes": list(evaluation.get("evidence_codes", [])),
+                "subject_count": evaluation.get("subject_count"),
                 "latency_ms": evaluation.get("latency_ms"),
                 "request_id": request_id,
                 "prompt_version": evaluation.get("prompt_version"),

@@ -93,10 +93,18 @@ export async function processPortrait(
 }
 
 /** Server-authoritative liveness of a stored capture (configured VLM_PROVIDER; /capture streamlined). */
+export interface TransactionLivenessResult {
+  classification: string | null
+  outcome: string
+  portrait_allowed: boolean
+  /** Safe retry reason codes (e.g. MULTIPLE_FACES), never raw VLM/provider output. */
+  reason_codes?: string[]
+}
+
 export async function evaluateTransactionLiveness(
   transactionId: string,
   attemptId?: string,
-): Promise<{ classification: string | null; outcome: string; portrait_allowed: boolean }> {
+): Promise<TransactionLivenessResult> {
   const form = new FormData()
   if (attemptId) form.append('attempt_id', attemptId)
   const data: unknown = await apiPostMultipart(
@@ -104,7 +112,7 @@ export async function evaluateTransactionLiveness(
     form,
     60_000,
   )
-  return data as { classification: string | null; outcome: string; portrait_allowed: boolean }
+  return data as TransactionLivenessResult
 }
 
 /** Controlled artifact URL for display (never an absolute server filesystem path) (M5.7 §62). */

@@ -55,6 +55,8 @@ class ExperimentResult(BaseModel):
     attack_medium: str | None = None
     self_reported_confidence: float | None = None
     evidence_codes: list[str] = Field(default_factory=list)
+    #: Normalized visible-person category (ZERO|ONE|MULTIPLE|UNCERTAIN); None on provider error.
+    subject_count: str | None = None
     latency_ms: int | None = None
     error: VlmErrorCode | None = None
 
@@ -149,6 +151,7 @@ class VlmEvaluationService:
             attack_medium=assessment.attack_medium,
             self_reported_confidence=assessment.self_reported_confidence,
             evidence_codes=list(assessment.evidence_codes),
+            subject_count=assessment.subject_count,
             provider_latency_ms=response.provider_latency_ms,
             total_latency_ms=total_latency_ms,
             input_tokens=usage.input_tokens if usage else None,
@@ -259,5 +262,6 @@ class VlmEvaluationService:
             attack_medium=assessment.attack_medium.value,
             self_reported_confidence=assessment.self_reported_confidence,
             evidence_codes=list(assessment.evidence_codes),
+            subject_count=assessment.subject_count.value,
             latency_ms=latency_ms,
         )

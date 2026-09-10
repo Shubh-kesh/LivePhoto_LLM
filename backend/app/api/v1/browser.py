@@ -324,7 +324,11 @@ async def browser_liveness(request: Request) -> Response:
     # --- claim/cache check under a SHORT lock (no provider call while holding the lock) ---
     with store.lock_transaction(internal_tx_id):
         cached = liveness.read_evaluation(store, internal_tx_id, identity)
-        if cached is not None:
+        # Reuse a cached record ONLY when it matches the CURRENT evaluation contract. A legacy
+        # v1 / missing-subject_count record is never reused for PASS; fall through and re-evaluate
+        # the same capture once (historical evidence is left in place until superseded by the fresh
+        # result written below).
+        if cached is not None and liveness.is_current_evaluation(cached):
             if cached.get("error"):
                 metrics.record_submit("liveness_cached_error")
                 raise ApiError(
@@ -341,6 +345,7 @@ async def browser_liveness(request: Request) -> Response:
                     "classification": cached.get("classification"),
                     "outcome": outcome.value,
                     "portrait_allowed": cached.get("portrait_allowed", False),
+                    "reason_codes": list(cached.get("reason_codes", [])),
                 }
             )
         if liveness.is_evaluation_claimed(store, internal_tx_id, identity):
@@ -425,6 +430,7 @@ async def browser_liveness(request: Request) -> Response:
                 "classification": evaluation.get("classification"),
                 "outcome": outcome.value,
                 "portrait_allowed": evaluation["portrait_allowed"],
+                "reason_codes": list(evaluation.get("reason_codes", [])),
             }
         )
 

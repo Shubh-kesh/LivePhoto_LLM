@@ -208,6 +208,31 @@ describe('IntegrationPage', () => {
     expect(screen.queryByText('Submit photo')).not.toBeInTheDocument()
   })
 
+  it('backend MULTIPLE_FACES shows the single-person retry copy and never exposes VLM/provider wording', async () => {
+    mockBrowserLiveness.mockResolvedValueOnce({
+      classification: 'LIVE',
+      outcome: 'RETRY',
+      portrait_allowed: false,
+      reason_codes: ['MULTIPLE_FACES'],
+    })
+    mockSession('active')
+    render(<IntegrationPage />)
+    await waitFor(() => expect(screen.getByTestId('mock-capture')).toBeInTheDocument())
+    screen.getByText('attempt-eligible').click()
+    screen.getByText('auto-process').click()
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          'Make sure only one person is visible. Move to a place where no one else is in the photo.',
+        ),
+      ).toBeInTheDocument(),
+    )
+    expect(mockTriggerPortrait).not.toHaveBeenCalled()
+    expect(screen.queryByText('Submit photo')).not.toBeInTheDocument()
+    // No VLM/provider/model/confidence wording leaks to the customer.
+    expect(screen.queryByText(/vlm|groq|confidence|provider|model/i)).not.toBeInTheDocument()
+  })
+
   it('liveness provider failure blocks portrait with a safe retry', async () => {
     mockBrowserLiveness.mockRejectedValueOnce(new Error('provider down'))
     mockSession('active')
