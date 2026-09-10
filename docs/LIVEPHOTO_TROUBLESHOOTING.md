@@ -600,3 +600,183 @@ capture. Without server-side binding, these attack/failure flows were possible:
    calls for the same capture.
 
 **Status:** Fixed
+
+---
+
+## 14. Browser + connectivity preflight on /capture and /xbiz/live_photo
+
+**Milestone:** pre-M6
+**Type:** Feature / Behavior
+**What it does:**
+Before ANY camera permission is requested, both capture journeys run a reusable gate
+(`frontend/src/features/connectivity/`):
+
+1. **Browser capability preflight** — feature detection of the exact APIs the current capture/quality
+   pipeline uses (`window.isSecureContext`, `navigator.mediaDevices.getUserMedia`,
+   `HTMLCanvasElement.getContext` + `canvas.toBlob`, `Blob`, `URL.createObjectURL` /
+   `URL.revokeObjectURL`, `window.requestAnimationFrame`). Never user-agent sniffing.
+2. **Backend reachability** — `GET /api/v1/info` through the normal API client with a short
+   (~4s) timeout. A cached success is never accepted as proof of connectivity.
+
+The journey only starts when both pass. `navigator.onLine` alone is never sufficient.
+
+**Startup states:** `CHECKING` -> `READY` | `OFFLINE` | `BACKEND_UNREACHABLE` | `UNSUPPORTED`.
+
+**Mid-session loss:** an `offline`/`online` event shows a blocking overlay while the mounted journey
+(capture/transaction state, camera) is preserved. Recovery requires a real `/api/v1/info` success.
+
+**Status:** Implemented
+
+---
+
+## 15. navigator.onLine is only a hint; backend reachability is authoritative
+
+**Milestone:** pre-M6
+**Type:** Behavior
+**Why:** `navigator.onLine` is a browser-level hint (it can be wrong, and a browser can be online
+while the LivePhoto backend, tunnel, or network path is down). The gate therefore:
+
+- treats `navigator.onLine === false` as a fast-path to the offline screen (no pointless probe),
+- NEVER treats the browser `online` event as recovery — it only triggers a fresh backend probe,
+- considers the backend reachable only when `GET /api/v1/info` actually succeeds.
+
+**Status:** Implemented
+
+---
+
+## 16. "Backend unavailable" vs "no internet connection"
+
+**Milestone:** pre-M6
+**Type:** Behavior
+**Distinction:**
+
+- **Offline** (browser reports offline): `No internet connection` / `Connect to the internet to continue.`
+- **Backend unreachable** (browser online, `/api/v1/info` fails): `We can't connect right now.` /
+  `Check your internet connection and try again.`
+
+The backend-unreachable screen never exposes the HTTP status, backend URL, Cloudflare, exception,
+or stack trace. Application-level responses (e.g. `401/403`/expired launch from a reachable backend)
+are NOT connectivity errors and continue through their normal session error handling.
+
+**Status:** Implemented
+
+---
+
+## 17. Supported-browser policy and unsupported-browser behavior
+
+**Milestone:** pre-M6
+**Type:** Policy
+**Policy:** capability-driven support, not version lists. TARGET browser families:
+
+- current/latest Google Chrome (desktop + Android)
+- current/latest Microsoft Edge
+- current/latest Firefox
+- current/latest Safari (desktop + iOS Safari)
+
+**Validated status:** connectivity preflight is exercised across Chromium, Firefox and WebKit.
+The full camera journey is validated where tests/devices actually passed: camera-dependent automated
+coverage is green on Chromium (synthetic camera); Firefox/WebKit camera-dependent Playwright coverage
+remains limited by the test environment. Physical Android Chrome and iPhone/iOS Safari validation is
+required before any UAT compatibility signoff — do not assume Firefox/WebKit gaps are purely
+Playwright limitations until physical-device validation confirms that. See
+`docs/CAMERA_COMPATIBILITY_MATRIX.md`.
+
+**Unsupported behavior:** if the capability preflight fails, LivePhoto shows `Browser not supported`
+with `Please use an updated version of Chrome, Edge, Firefox, or Safari.` and does NOT request the
+camera. `INSECURE_CONTEXT` keeps its distinct message (`Camera requires a secure connection` /
+`Use HTTPS to open LivePhoto.`). No large polyfill bundles are shipped to support obsolete browsers;
+incompatible embedded WebViews fail gracefully.
+
+**Status:** Implemented
+
+---
+
+## 18. Cold-start offline limitation (no service worker by design)
+
+**Milestone:** pre-M6
+**Type:** Known limitation
+**Limitation:** if the LivePhoto URL is opened for the FIRST time while completely offline, the
+frontend HTML/JS cannot load, so the React offline screen cannot be shown — the browser shows its
+native offline page. Once the app JS has loaded, LivePhoto detects connectivity loss and shows its
+own UI.
+
+**Deliberate:** no service worker/PWA cache is added in this task. Offline caching/service workers in
+a banking flow require a separate security/design decision.
+
+**Status:** Known limitation (documented, not "fixed")
+
+---
+
+## 19. Mobile / Cloudflare connectivity testing
+
+**Milestone:** pre-M6
+**Type:** Manual testing
+**Steps (phone + Cloudflare):**
+
+1. Start backend (`backend/`) and frontend (`frontend/`) with `VITE_API_BASE_URL=` (empty). Vite
+   proxies `/api` to the backend locally.
+2. Expose the frontend over the tunnel:
+
+   ```
+   cloudflared tunnel --url http://localhost:5173
+   ```
+
+3. Open the tunnel URL on the phone.
+4. Turn Wi-Fi/mobile data OFF: the app should show the connection-lost/offline state and start no
+   new server actions.
+5. Turn the network back ON: the app must run a real backend probe before the journey resumes.
+6. Continue the capture normally.
+
+Note: the earlier portrait `500` seen through Cloudflare was NOT a Cloudflare issue — it reproduced
+locally and was the mobile `720x1280` passport-crop bug (section 13), now fixed. Do not change
+Cloudflare/CORS settings for it.
+
+**Status:** Manual steps provided; physical-device validation still required before UAT
+(Android Chrome, iPhone/iOS Safari).
+
+---
+
+## 20. Browser update required (minimum supported version policy)
+
+**Milestone:** pre-M6
+**Type:** Feature / Policy
+**What it does:**
+The connectivity gate now enforces a backend-owned minimum supported browser version. A single
+`GET /api/v1/info` probe (cache: no-store) returns BOTH backend reachability AND the browser
+policy; the frontend detects the browser family + major version and evaluates it against the
+policy before the journey can start.
+
+**Policy location and reload semantics:**
+- File: `backend/config/browser-support.json` (committed, provisional values; e.g. chrome 120,
+  safari 17).
+- Loaded ONCE at backend startup. Changing the file requires a backend restart / pod rollout (no
+  ad-hoc hot reload). Later the JSON can be supplied via a Kubernetes ConfigMap without code
+  changes.
+- `/api/v1/info` serves `browser_policy` (safe fields only; never filesystem paths or secrets).
+
+**Customer states:**
+- Below minimum -> "Browser update required" / "Please update your browser to continue." +
+  **Check again** (re-fetches fresh /info, redetects, reruns capabilities/connectivity). No
+  "Continue anyway".
+- Unknown family -> "Browser not supported".
+- Recognized family, unparseable version -> "Browser update required" with
+  "We couldn't verify that this browser version is supported…" (raw user-agent is never shown).
+- Policy missing/unavailable -> fail closed with the same "couldn't verify" block.
+
+**iOS / shells:** iOS environments (incl. Chrome/Firefox/Edge on iOS) map to the `ios_safari`
+policy using the iOS OS version. Firefox-on-Android, Samsung Internet, Opera and Vivaldi are not in
+the current policy families and fail closed as "Browser not supported".
+
+**SECURITY NOTE:** version detection is a compatibility gate, NOT a security boundary. It is
+spoofable and never affects liveness/PASS/portrait/fraud/callback security.
+
+**Simulating the block locally (no old browser needed):**
+1. Open `backend/config/browser-support.json`.
+2. Temporarily raise a browser's `minimum_major` above the running browser (e.g. current Chrome 140
+   -> set `chrome.minimum_major` to 141).
+3. Restart the backend, reload the frontend -> "Browser update required".
+4. Restore the minimum to <= the running version, restart the backend, press Check again -> flow
+   proceeds.
+
+**Status:** Implemented (provisional minima; physical UAT browser/device validation still required
+to certify final versions).

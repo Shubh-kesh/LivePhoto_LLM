@@ -120,6 +120,11 @@ class Settings(BaseSettings):
     #: committed example resolves to ``backend/config/consumers.example.json``.
     consumer_profiles_path: str = "config/consumers.example.json"
 
+    #: Path to the browser-support policy (minimum supported browser versions). Operational
+    #: configuration, not a secret; validated at startup and exposed (safe fields only) via
+    #: ``GET /api/v1/info``. Committed default: ``backend/config/browser-support.json``.
+    browser_support_policy_path: str = "config/browser-support.json"
+
     # Launch capability tokens (M5.8 §7). Opaque, >=256-bit, hash-only persistence.
     launch_token_ttl_seconds: int = 600
 

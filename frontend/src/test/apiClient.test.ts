@@ -81,6 +81,21 @@ describe('apiRequest', () => {
     })
   })
 
+  it('passes an explicit cache mode through to fetch (e.g. connectivity no-store)', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      fakeResponse({
+        ok: true,
+        status: 200,
+        body: { name: 'LivePhoto', version: '0.1.0', environment: 'test' },
+      }),
+    )
+    await apiRequest('/api/v1/info', { cache: 'no-store' })
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/v1/info'),
+      expect.objectContaining({ cache: 'no-store' }),
+    )
+  })
+
   it('maps network failures to a safe ApiClientError', async () => {
     vi.mocked(fetch).mockRejectedValue(new TypeError('Failed to fetch'))
     const promise = apiRequest('/api/v1/info')

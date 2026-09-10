@@ -18,6 +18,10 @@ from app.api.experiments_router import experiments_router
 from app.api.health import router as health_router
 from app.api.transactions_router import transactions_router
 from app.api.xbiz import router as xbiz_router
+from app.core.browser_policy import (
+    BrowserPolicyConfigError,
+    load_browser_support_policy,
+)
 from app.core.config import Settings, get_settings
 from app.core.errors import register_exception_handlers
 from app.core.health import ReadinessResult, database_readiness_check
@@ -78,6 +82,20 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.consumer_config_error = str(exc)
     app.state.ready_checks.append(lambda: integration_readiness_check(app))
 
+    # Browser-support policy: loaded once at startup (predictable; changing the file requires a
+    # restart / pod rollout). UAT/production fail closed on a missing/invalid policy; local/test/dev
+    # report it as unavailable but stay bootable (the committed file is always valid).
+    try:
+        app.state.browser_support_policy = load_browser_support_policy(
+            settings.browser_support_policy_path
+        )
+        app.state.browser_policy_ok = True
+    except BrowserPolicyConfigError as exc:
+        app.state.browser_support_policy = None
+        app.state.browser_policy_ok = False
+        app.state.browser_policy_config_error = str(exc)
+    app.state.ready_checks.append(lambda: browser_policy_readiness_check(app))
+
     yield
     if app.state.engine is not None:
         app.state.engine.dispose()
@@ -110,6 +128,27 @@ def integration_readiness_check(app: FastAPI) -> ReadinessResult:
         return ReadinessResult(name="integration", status="ok")
     return ReadinessResult(
         name="integration", status="ok", detail="configured" if ok else "optional"
+    )
+
+
+def browser_policy_readiness_check(app: FastAPI) -> ReadinessResult:
+    """Browser-support policy readiness.
+
+    UAT/production require a valid policy and fail closed. local/test/dev treat the policy as
+    optional and never fail base readiness on its absence (the committed file is always valid).
+    """
+    settings = app.state.settings
+    ok = bool(getattr(app.state, "browser_policy_ok", False))
+    if settings.app_env in ("uat", "production"):
+        if not ok:
+            return ReadinessResult(
+                name="browser_policy",
+                status="unavailable",
+                detail="browser support policy is not configured",
+            )
+        return ReadinessResult(name="browser_policy", status="ok")
+    return ReadinessResult(
+        name="browser_policy", status="ok", detail="configured" if ok else "optional"
     )
 
 

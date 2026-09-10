@@ -1,0 +1,30 @@
+/* Connectivity gate: full-screen blocking states + mid-session loss overlay. */
+
+.lp-connectivity-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.lp-connectivity-overlay__card {
+  max-width: 26rem;
+  width: 100%;
+  padding: 2rem;
+  border-radius: 0.75rem;
+  background: #fff;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+  text-align: center;
+}
+
+.lp-connectivity-overlay .lp-title {
+  margin-top: 0;
+}
+
+.lp-connectivity-overlay .lp-subtitle {
+  margin-bottom: 1.5rem;
+}

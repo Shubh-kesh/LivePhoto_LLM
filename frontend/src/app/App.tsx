@@ -1,6 +1,7 @@
 import { QueryClientProvider } from '@tanstack/react-query'
 import { Route, Routes } from 'react-router-dom'
 
+import { ConnectivityGate } from '../features/connectivity/ConnectivityGate'
 import { CapturePage } from '../features/capture/CapturePage'
 import { IntegrationPage } from '../features/integration/IntegrationPage'
 import { HomePage } from '../pages/HomePage'
@@ -14,8 +15,22 @@ export default function App() {
       <QueryClientProvider client={queryClient}>
         <Routes>
           <Route path="/" element={<HomePage />} />
-          <Route path="/capture" element={<CapturePage />} />
-          <Route path="/xbiz/live_photo" element={<IntegrationPage />} />
+          <Route
+            path="/capture"
+            element={
+              <ConnectivityGate>
+                <CapturePage />
+              </ConnectivityGate>
+            }
+          />
+          <Route
+            path="/xbiz/live_photo"
+            element={
+              <ConnectivityGate>
+                <IntegrationPage />
+              </ConnectivityGate>
+            }
+          />
           <Route path="/dev/vlm-experiment" element={<CapturePage experiment />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>

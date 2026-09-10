@@ -1,0 +1,29 @@
+{
+  "policy_version": "browser-policy-v1",
+  "browsers": {
+    "chrome": {
+      "minimum_major": 120,
+      "enabled": true
+    },
+    "edge": {
+      "minimum_major": 120,
+      "enabled": true
+    },
+    "firefox": {
+      "minimum_major": 120,
+      "enabled": true
+    },
+    "safari": {
+      "minimum_major": 17,
+      "enabled": true
+    },
+    "ios_safari": {
+      "minimum_major": 17,
+      "enabled": true
+    },
+    "android_chrome": {
+      "minimum_major": 120,
+      "enabled": true
+    }
+  }
+}

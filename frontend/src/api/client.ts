@@ -19,6 +19,8 @@ export class ApiClientError extends Error {
 interface ApiRequestOptions {
   timeoutMs?: number
   headers?: Record<string, string>
+  /** Fetch cache mode (e.g. `no-store` for the connectivity probe). Defaults to the browser default. */
+  cache?: RequestCache
 }
 
 const DEFAULT_TIMEOUT_MS = 10_000
@@ -50,6 +52,7 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
     method: 'GET',
     headers: options.headers,
     timeoutMs: options.timeoutMs,
+    cache: options.cache,
   })
   return (await response.json()) as T
 }
@@ -76,6 +79,7 @@ async function request(
     headers?: Record<string, string>
     body?: BodyInit
     timeoutMs?: number
+    cache?: RequestCache
   },
 ): Promise<Response> {
   const controller = new AbortController()
@@ -90,6 +94,7 @@ async function request(
       headers: { Accept: 'application/json', ...(options.headers ?? {}) },
       body: options.body,
       signal: controller.signal,
+      cache: options.cache,
     })
   } catch {
     throw new ApiClientError('NETWORK_ERROR', 'Unable to reach the service', 0, null)

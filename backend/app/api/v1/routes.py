@@ -12,8 +12,10 @@ router = APIRouter(tags=["info"])
 @router.get("/info", response_model=InfoResponse, summary="Non-sensitive application info")
 def get_info(request: Request) -> InfoResponse:
     settings = request.app.state.settings
+    policy = getattr(request.app.state, "browser_support_policy", None)
     return InfoResponse(
         name=settings.app_name,
         version=settings.app_version,
         environment=settings.app_env,
+        browser_policy=policy,
     )
