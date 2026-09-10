@@ -28,7 +28,7 @@ def _record(
         predicted=predicted,
         provider="gemini",
         model="gemini-x",
-        prompt_version="vlm-passive-v2",
+        prompt_version="vlm-passive-v3",
         frame_strategy=strategy,
         self_reported_confidence=confidence,
         latency_ms=1000,

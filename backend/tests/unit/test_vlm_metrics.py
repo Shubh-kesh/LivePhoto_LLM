@@ -28,7 +28,7 @@ def _record(
         predicted=predicted,
         provider=provider,
         model=model,
-        prompt_version="vlm-passive-v2",
+        prompt_version="vlm-passive-v3",
         frame_strategy=strategy,
         self_reported_confidence=confidence,
         latency_ms=1000,

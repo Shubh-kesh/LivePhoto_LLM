@@ -39,6 +39,7 @@ class _FakeProvider:
                 attack_medium=AttackMedium.NONE,
                 self_reported_confidence=0.95,
                 subject_count="ONE",
+                secondary_person_state="NONE",
             ),
             provider="mock",
             model=self.info.model_id,
@@ -66,10 +67,10 @@ def test_request_carries_prompt_versioning() -> None:
     request = VisionEvaluationRequest(
         images=[],
         prompt_id="passive-liveness",
-        prompt_version="vlm-passive-v2",
+        prompt_version="vlm-passive-v3",
         temperature=0.0,
     )
-    assert request.prompt_version == "vlm-passive-v2"
+    assert request.prompt_version == "vlm-passive-v3"
     assert request.temperature == 0.0
 
 
@@ -79,13 +80,15 @@ def test_assessment_keeps_taxonomy_distinct() -> None:
         attack_medium=AttackMedium.MOBILE_SCREEN,
         self_reported_confidence=0.86,
         subject_count="ONE",
+        secondary_person_state="NONE",
     )
     data = assessment.model_dump()
     assert data["classification"] == "SCREEN_REPLAY"
     assert data["attack_medium"] == "MOBILE_SCREEN"
     assert data["self_reported_confidence"] == 0.86
-    assert data["schema_version"] == "vlm-result-v2"
+    assert data["schema_version"] == "vlm-result-v3"
     assert data["subject_count"] == "ONE"
+    assert data["secondary_person_state"] == "NONE"
 
 
 def test_assessment_rejects_unknown_classification() -> None:

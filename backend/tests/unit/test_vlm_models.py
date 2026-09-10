@@ -22,6 +22,7 @@ def test_assessment_accepts_valid_live_result() -> None:
         self_reported_confidence=0.95,
         evidence_codes=[EvidenceCode.ENVIRONMENT_CONSISTENT_WITH_LIVE],
         subject_count="ONE",
+        secondary_person_state="NONE",
     )
     assert assessment.classification is VlmClassification.LIVE
     assert assessment.self_reported_confidence == 0.95
@@ -68,6 +69,7 @@ def test_assessment_retains_unknown_evidence_codes() -> None:
             "self_reported_confidence": 0.9,
             "evidence_codes": ["BLANK_FRAME", "NO_FACE_DETECTED"],
             "subject_count": "ONE",
+            "secondary_person_state": "NONE",
         }
     )
     assert assessment.evidence_codes == ["BLANK_FRAME", "NO_FACE_DETECTED"]
@@ -89,11 +91,12 @@ def test_parse_assessment_validates_strictly() -> None:
     text = (
         '{"classification": "SCREEN_REPLAY", "attack_medium": "MOBILE_SCREEN", '
         '"self_reported_confidence": 0.86, "evidence_codes": ["DEVICE_BORDER_VISIBLE"], '
-        '"subject_count": "ONE"}'
+        '"subject_count": "ONE", "secondary_person_state": "NONE"}'
     )
     assessment = parse_assessment(text)
     assert assessment.classification is VlmClassification.SCREEN_REPLAY
     assert assessment.subject_count.value == "ONE"
+    assert assessment.secondary_person_state.value == "NONE"
 
 
 def test_parse_assessment_invalid_json_raises_schema_error() -> None:
@@ -115,7 +118,7 @@ def test_parse_assessment_handles_code_fence_wrapper() -> None:
         "```json\n"
         '{"classification": "PRINT_ATTACK", "attack_medium": "PRINT_PHOTO", '
         '"self_reported_confidence": 0.8, "evidence_codes": ["PAPER_TEXTURE"], '
-        '"subject_count": "ONE"}\n'
+        '"subject_count": "ONE", "secondary_person_state": "NONE"}\n'
         "```"
     )
     assessment = parse_assessment(text)
@@ -127,6 +130,17 @@ def test_parse_assessment_missing_subject_count_is_schema_failure() -> None:
     with pytest.raises(VlmError) as exc:
         parse_assessment(
             '{"classification": "LIVE", "attack_medium": "NONE", '
-            '"self_reported_confidence": 0.9, "evidence_codes": []}'
+            '"self_reported_confidence": 0.9, "evidence_codes": [], '
+            '"secondary_person_state": "NONE"}'
+        )
+    assert exc.value.code is VlmErrorCode.SCHEMA_VALIDATION_ERROR
+
+
+def test_parse_assessment_missing_secondary_person_state_is_schema_failure() -> None:
+    # A LIVE result WITHOUT secondary_person_state must fail closed (never default NONE).
+    with pytest.raises(VlmError) as exc:
+        parse_assessment(
+            '{"classification": "LIVE", "attack_medium": "NONE", '
+            '"self_reported_confidence": 0.9, "evidence_codes": [], "subject_count": "ONE"}'
         )
     assert exc.value.code is VlmErrorCode.SCHEMA_VALIDATION_ERROR

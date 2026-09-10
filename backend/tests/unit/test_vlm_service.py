@@ -87,9 +87,10 @@ async def test_successful_mock_evaluation() -> None:
     assert result.provider == "mock"
     assert result.error is None
     assert result.latency_ms is not None
-    assert result.prompt_version == "vlm-passive-v2"
-    assert result.schema_version == "vlm-result-v2"
+    assert result.prompt_version == "vlm-passive-v3"
+    assert result.schema_version == "vlm-result-v3"
     assert result.subject_count == "ONE"
+    assert result.secondary_person_state == "NONE"
     assert result.frame_strategy == "single-quality-v1"
     assert result.image_count == 1
 

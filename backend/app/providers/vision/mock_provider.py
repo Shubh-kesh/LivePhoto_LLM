@@ -3,13 +3,18 @@
 Used for tests and the E2E mock backend. No network. Behavior is driven by
 ``request.provider_options["mock_behavior"]``:
 default | live | screen_replay | print | uncertain | quality_failure | timeout | auth | schema |
-response_error | live_multiple | live_zero | live_subject_uncertain.
+response_error | live_multiple | live_multiple_background | live_multiple_uncertain | live_zero |
+live_subject_uncertain | live_one_background | live_multiple_none | live_uncertain_background.
 
-``live_multiple`` / ``live_zero`` / ``live_subject_uncertain`` combine classification LIVE with a
-subject_count of MULTIPLE / ZERO / UNCERTAIN for deterministic single-person-enforcement tests.
-``request.provider_options["mock_subject_count"]`` (e.g. "MULTIPLE") overrides the subject_count
-for any behavior. Only ever active when provider == "mock" (never reachable from a real provider
-path).
+``live_multiple`` -> LIVE + subject_count MULTIPLE + secondary_person_state INTERFERING (retry).
+``live_multiple_background`` -> LIVE + MULTIPLE + BACKGROUND (allowed).
+``live_multiple_uncertain`` -> LIVE + MULTIPLE + UNCERTAIN (retry).
+``live_one_background`` / ``live_multiple_none`` / ``live_uncertain_background`` produce
+semantically INCONSISTENT pairs (fail closed) for negative tests.
+``live_zero`` / ``live_subject_uncertain`` combine classification LIVE with ZERO / UNCERTAIN
+subject_count. ``request.provider_options["mock_subject_count"]`` and
+``mock_secondary_person_state`` override those fields for any behavior. Only ever active when
+provider == "mock" (never reachable from a real provider path).
 """
 
 from __future__ import annotations
@@ -27,6 +32,7 @@ from app.providers.vision.errors import VlmError, VlmErrorCode
 from app.providers.vision.models import (
     AttackMedium,
     EvidenceCode,
+    SecondaryPersonState,
     SubjectCount,
     VisionEvaluationRequest,
     VisionEvaluationResponse,
@@ -77,15 +83,21 @@ class MockVisionProvider(VisionProvider):
             raise VlmError(VlmErrorCode.PROVIDER_RESPONSE_ERROR, "mock malformed response")
 
         assessment = _assessment_for(behavior)
-        override = request.provider_options.get("mock_subject_count")
-        if override:
-            try:
-                assessment = assessment.model_copy(update={"subject_count": SubjectCount(override)})
-            except ValueError as exc:  # pragma: no cover - test misuse
-                raise VlmError(
-                    VlmErrorCode.PROVIDER_BAD_REQUEST,
-                    f"invalid mock_subject_count '{override}'",
-                ) from exc
+        subject_override = request.provider_options.get("mock_subject_count")
+        secondary_override = request.provider_options.get("mock_secondary_person_state")
+        updates: dict[str, object] = {}
+        try:
+            if subject_override:
+                updates["subject_count"] = SubjectCount(subject_override)
+            if secondary_override:
+                updates["secondary_person_state"] = SecondaryPersonState(secondary_override)
+        except ValueError as exc:  # pragma: no cover - test misuse
+            raise VlmError(
+                VlmErrorCode.PROVIDER_BAD_REQUEST,
+                "invalid mock subject_count/secondary_person_state override",
+            ) from exc
+        if updates:
+            assessment = assessment.model_copy(update=updates)
         return VisionEvaluationResponse(
             assessment=assessment,
             provider="mock",
@@ -107,7 +119,15 @@ class MockVisionProvider(VisionProvider):
 
 def _assessment_for(behavior: str) -> VlmAssessment:
     mapping: dict[
-        str, tuple[VlmClassification, AttackMedium, float, list[EvidenceCode], SubjectCount]
+        str,
+        tuple[
+            VlmClassification,
+            AttackMedium,
+            float,
+            list[EvidenceCode],
+            SubjectCount,
+            SecondaryPersonState,
+        ],
     ] = {
         "default": (
             VlmClassification.SCREEN_REPLAY,
@@ -115,6 +135,7 @@ def _assessment_for(behavior: str) -> VlmAssessment:
             0.87,
             [EvidenceCode.DEVICE_BORDER_VISIBLE, EvidenceCode.DISPLAY_REFLECTION],
             SubjectCount.ONE,
+            SecondaryPersonState.NONE,
         ),
         "screen_replay": (
             VlmClassification.SCREEN_REPLAY,
@@ -122,6 +143,7 @@ def _assessment_for(behavior: str) -> VlmAssessment:
             0.86,
             [EvidenceCode.DEVICE_BORDER_VISIBLE],
             SubjectCount.ONE,
+            SecondaryPersonState.NONE,
         ),
         "live": (
             VlmClassification.LIVE,
@@ -129,6 +151,7 @@ def _assessment_for(behavior: str) -> VlmAssessment:
             0.95,
             [EvidenceCode.ENVIRONMENT_CONSISTENT_WITH_LIVE],
             SubjectCount.ONE,
+            SecondaryPersonState.NONE,
         ),
         "live_multiple": (
             VlmClassification.LIVE,
@@ -136,6 +159,47 @@ def _assessment_for(behavior: str) -> VlmAssessment:
             0.95,
             [EvidenceCode.ENVIRONMENT_CONSISTENT_WITH_LIVE],
             SubjectCount.MULTIPLE,
+            SecondaryPersonState.INTERFERING,
+        ),
+        "live_multiple_background": (
+            VlmClassification.LIVE,
+            AttackMedium.NONE,
+            0.95,
+            [EvidenceCode.ENVIRONMENT_CONSISTENT_WITH_LIVE],
+            SubjectCount.MULTIPLE,
+            SecondaryPersonState.BACKGROUND,
+        ),
+        "live_multiple_uncertain": (
+            VlmClassification.LIVE,
+            AttackMedium.NONE,
+            0.95,
+            [EvidenceCode.ENVIRONMENT_CONSISTENT_WITH_LIVE],
+            SubjectCount.MULTIPLE,
+            SecondaryPersonState.UNCERTAIN,
+        ),
+        "live_one_background": (
+            VlmClassification.LIVE,
+            AttackMedium.NONE,
+            0.95,
+            [EvidenceCode.ENVIRONMENT_CONSISTENT_WITH_LIVE],
+            SubjectCount.ONE,
+            SecondaryPersonState.BACKGROUND,
+        ),
+        "live_multiple_none": (
+            VlmClassification.LIVE,
+            AttackMedium.NONE,
+            0.95,
+            [EvidenceCode.ENVIRONMENT_CONSISTENT_WITH_LIVE],
+            SubjectCount.MULTIPLE,
+            SecondaryPersonState.NONE,
+        ),
+        "live_uncertain_background": (
+            VlmClassification.LIVE,
+            AttackMedium.NONE,
+            0.95,
+            [EvidenceCode.ENVIRONMENT_CONSISTENT_WITH_LIVE],
+            SubjectCount.UNCERTAIN,
+            SecondaryPersonState.BACKGROUND,
         ),
         "live_zero": (
             VlmClassification.LIVE,
@@ -143,6 +207,7 @@ def _assessment_for(behavior: str) -> VlmAssessment:
             0.95,
             [EvidenceCode.ENVIRONMENT_CONSISTENT_WITH_LIVE],
             SubjectCount.ZERO,
+            SecondaryPersonState.NONE,
         ),
         "live_subject_uncertain": (
             VlmClassification.LIVE,
@@ -150,6 +215,7 @@ def _assessment_for(behavior: str) -> VlmAssessment:
             0.95,
             [EvidenceCode.ENVIRONMENT_CONSISTENT_WITH_LIVE],
             SubjectCount.UNCERTAIN,
+            SecondaryPersonState.UNCERTAIN,
         ),
         "print": (
             VlmClassification.PRINT_ATTACK,
@@ -157,6 +223,7 @@ def _assessment_for(behavior: str) -> VlmAssessment:
             0.82,
             [EvidenceCode.PAPER_TEXTURE, EvidenceCode.PRINT_HALFTONE_PATTERN],
             SubjectCount.ONE,
+            SecondaryPersonState.NONE,
         ),
         "uncertain": (
             VlmClassification.UNCERTAIN,
@@ -164,6 +231,7 @@ def _assessment_for(behavior: str) -> VlmAssessment:
             0.4,
             [EvidenceCode.INSUFFICIENT_VISUAL_EVIDENCE],
             SubjectCount.UNCERTAIN,
+            SecondaryPersonState.UNCERTAIN,
         ),
         "quality_failure": (
             VlmClassification.QUALITY_FAILURE,
@@ -171,15 +239,17 @@ def _assessment_for(behavior: str) -> VlmAssessment:
             0.9,
             [EvidenceCode.INSUFFICIENT_VISUAL_EVIDENCE],
             SubjectCount.UNCERTAIN,
+            SecondaryPersonState.UNCERTAIN,
         ),
     }
-    classification, medium, confidence, codes, subject_count = mapping[behavior]
+    classification, medium, confidence, codes, subject_count, secondary = mapping[behavior]
     return VlmAssessment(
         classification=classification,
         attack_medium=medium,
         self_reported_confidence=confidence,
         evidence_codes=codes,
         subject_count=subject_count,
+        secondary_person_state=secondary,
     )
 
 

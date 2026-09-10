@@ -783,41 +783,66 @@ to certify final versions).
 
 ---
 
-## 21. Backend single-person (subject_count) enforcement
+## 21. Backend secondary-person (background vs interfering) enforcement
 
 **Milestone:** pre-M6
 **Type:** Feature / Security hardening (defense-in-depth)
-**Why:** Real captures with two people (side-by-side, second face behind a shoulder, touching
-bodies, second person near the frame edge) could reach portrait processing because MODNet portrait
-matting is not person-instance segmentation — overlapping/touching people can both be preserved in
-the matte. A multiple-person capture is a **capture-quality failure → RETRY**, not fraud.
+**Why:** Real captures with two people can reach portrait processing because MODNet portrait matting
+is not person-instance segmentation — overlapping/touching people can both be preserved in the
+matte. But a **small/distant background person** is NOT a failure: matting removes background
+people. The gate must distinguish an interfering second person from a background one.
 
 **Authoritative rule:** canonical PASS is written ONLY when the backend VLM returns
-`classification == LIVE` AND `subject_count == ONE`. `LIVE` + `MULTIPLE`/`ZERO`/`UNCERTAIN`/missing
-`subject_count` -> RETRY, `portrait_allowed=false`, no PASS. Missing data is never defaulted to ONE.
+`classification == LIVE` AND the `(subject_count, secondary_person_state)` pair is **coherent** and
+**portrait-eligible**: `ONE+NONE` or `MULTIPLE+BACKGROUND`. `INTERFERING` / `UNCERTAIN` / missing
+state / any contradictory pair -> RETRY, `portrait_allowed=false`, no PASS. Missing or contradictory
+data is never repaired or defaulted.
+
+Coherent pairs: `ZERO+NONE`, `ONE+NONE`, `MULTIPLE+BACKGROUND`, `MULTIPLE+INTERFERING`,
+`MULTIPLE+UNCERTAIN`, `UNCERTAIN+UNCERTAIN`. Contradictory pairs (e.g. `ONE+BACKGROUND`,
+`MULTIPLE+NONE`, `ZERO+BACKGROUND`, `UNCERTAIN+BACKGROUND`) fail closed. One shared predicate
+(`liveness.is_portrait_eligible_vlm_result`) is used by liveness promotion,
+`has_current_canonical_pass`, `/browser/portrait`, `/browser/submit`, the standalone
+`/transactions/{id}/portrait`, and cached-result eligibility.
+
+- `LIVE` + `subject_count=MULTIPLE` + `secondary_person_state=BACKGROUND` -> **PASS** (distant
+  person; portrait matting removes them).
+- `LIVE` + `subject_count=MULTIPLE` + `secondary_person_state=INTERFERING` -> RETRY /
+  `MULTIPLE_FACES`.
+- `LIVE` + `subject_count=ZERO` + `secondary_person_state=NONE` -> RETRY / `NO_FACE`.
+- `SCREEN_REPLAY` / `PRINT_ATTACK` -> FAIL regardless of person state.
+
+`subject_count` (ZERO|ONE|MULTIPLE|UNCERTAIN) is retained for evidence/diagnostics; the
+authoritative multi-person blocker is `secondary_person_state`.
 
 **Enforcement points:**
-- `POST /api/v1/browser/liveness` — writes a RETRY decision (never PASS) for MULTIPLE.
+- `POST /api/v1/browser/liveness` — writes a RETRY decision (never PASS) for INTERFERING/UNCERTAIN.
 - `POST /api/v1/browser/portrait` and `POST /api/v1/browser/submit` — blocked by the current-PASS
-  binding (no PASS exists after MULTIPLE).
-- Standalone `POST /api/v1/transactions/{id}/portrait` — requires a persisted LIVE + ONE result
-  (`vlm/result.json`), so MULTIPLE/UNCERTAIN never enter portrait processing even though the
-  classification field is LIVE.
+  binding (no PASS exists after an interfering result).
+- Standalone `POST /api/v1/transactions/{id}/portrait` — requires a persisted LIVE result whose
+  `secondary_person_state` is NONE/BACKGROUND; INTERFERING/UNCERTAIN never enter portrait.
 
 **Customer surface:** safe reason code `MULTIPLE_FACES` only; frontend maps it to "Make sure only
 one person is visible." VLM/Groq/model/confidence/prompt are never exposed.
 
-**Persistence:** `subject_count` is stored in `liveness/<identity>.json`, `vlm/result.json` and the
-canonical decision metadata, bound to the same attempt_id / selected_sha256 / liveness_identity.
+**Persistence:** `subject_count` and `secondary_person_state` are stored in
+`liveness/<identity>.json`, `vlm/result.json` and the canonical decision metadata, bound to the same
+attempt_id / selected_sha256 / liveness_identity. Both are logged (normalized, no raw image/secrets).
 
-**Schema/version:** the normalized VLM schema is now `vlm-result-v2` with a REQUIRED
-`subject_count`; a missing/invalid value is a schema failure (fail closed). Prompt is
-`vlm-passive-v2` and instructs the model to inspect the whole image (sides, background, partially
-occluded areas) and never to ignore a second person merely because the primary subject is dominant.
+**Schema/version:** the normalized VLM schema is now `vlm-result-v3` with REQUIRED `subject_count`
+and `secondary_person_state`; a missing/invalid value is a schema failure (fail closed). Prompt is
+`vlm-passive-v3`, instructing the model to inspect the whole image and distinguish BACKGROUND from
+INTERFERING. Old v1/v2 caches (missing `secondary_person_state`) are never reused for PASS — they are
+re-evaluated once under the current contract.
 
 **Deterministic test behaviors (mock provider, local/test/dev only):**
-`live` (ONE) | `live_multiple` | `live_zero` | `live_subject_uncertain` | plus
-`mock_subject_count` provider override.
+`live` (ONE+NONE) | `live_multiple` (MULTIPLE+INTERFERING) | `live_multiple_background`
+(MULTIPLE+BACKGROUND) | `live_multiple_uncertain` | `live_zero` | `live_subject_uncertain` | plus
+`mock_subject_count` / `mock_secondary_person_state` provider overrides.
 
-**Status:** Implemented (authoritative backend gate); accuracy on real multi-person captures is
-validated only by the manual mobile/laptop test plan, not by synthetic tests.
+**Frontend alignment:** the frontend face-participation rule already ignores small peripheral
+background faces; both layers now follow the same business concept (interfering -> retry;
+distant/background -> may continue).
+
+**Status:** Implemented (authoritative backend gate); background-vs-interfering accuracy on real
+captures is validated only by the manual mobile/laptop test plan, not by synthetic tests.

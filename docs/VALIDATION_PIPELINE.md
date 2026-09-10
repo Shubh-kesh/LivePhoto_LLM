@@ -294,27 +294,47 @@ Bands are conceptual targets to be re-baselined with real measurements (M5/M14/M
 deliberately not "unrealistically strict". VLM timeout must be short enough that a VLM stall cannot
 push the end-to-end decision past the cap while preserving fail-safe semantics.
 
-## 14. Single-person enforcement (subject_count) — pre-M6
+## 14. Secondary-person (background vs interfering) enforcement — pre-M6
 
-Final accepted LivePhoto captures must contain exactly **ONE meaningful visible person/face**.
+A final accepted LivePhoto capture needs exactly one **primary** person; an additional **distant /
+background** person is allowed (portrait matting removes them), but an **interfering** second person
+is a capture-quality failure → RETRY.
 
 **Layering (defense-in-depth):**
 
-- **Frontend** `MULTIPLE_FACES` local quality check = early UX / cost optimization. It rejects
-  obviously multi-person captures before upload and never authorizes anything.
-- **Backend** authoritative VLM `subject_count` (ZERO | ONE | MULTIPLE | UNCERTAIN) = mandatory
-  enforcement **before** any canonical PASS. Browser-supplied face counts are never trusted.
+- **Frontend** `MULTIPLE_FACES` local quality check (face-participation rule) = early UX / cost
+  optimization. Small peripheral/background faces do not force MULTIPLE_FACES; it never authorizes.
+- **Backend** authoritative VLM `secondary_person_state`
+  (`NONE | BACKGROUND | INTERFERING | UNCERTAIN`) = mandatory enforcement **before** any canonical
+  PASS. Browser-supplied face counts are never trusted. `subject_count`
+  (`ZERO | ONE | MULTIPLE | UNCERTAIN`) is retained for evidence/diagnostics only.
 
 **Rule (authoritative promotion):** canonical `PASS` is written ONLY when the backend VLM says
-`classification == LIVE` **AND** `subject_count == ONE`. Otherwise the outcome is `RETRY` (with
-safe reason codes `MULTIPLE_FACES` / `NO_FACE` where applicable) and `portrait_allowed` is false.
-`LIVE` + `MULTIPLE` / `ZERO` / `UNCERTAIN` / missing `subject_count` NEVER produces PASS. Missing
-data is never defaulted to ONE.
+`classification == LIVE` **AND** `secondary_person_state IN {NONE, BACKGROUND}` (and
+`subject_count != ZERO`). Otherwise the outcome is `RETRY` (with safe reason code `MULTIPLE_FACES`
+for INTERFERING, `NO_FACE` for ZERO) and `portrait_allowed` is false. `INTERFERING` / `UNCERTAIN` /
+missing `secondary_person_state` never produce PASS; missing data is never defaulted to
+NONE/BACKGROUND.
+
+Examples: `LIVE + ONE + NONE → PASS`; `LIVE + MULTIPLE + BACKGROUND → PASS` (distant person);
+`LIVE + MULTIPLE + INTERFERING → RETRY`; `LIVE + MULTIPLE + UNCERTAIN → RETRY`.
+`SCREEN_REPLAY` / `PRINT_ATTACK` → FAIL regardless of person state.
+
+**Coherence (single shared rule at every boundary):** `subject_count` and
+`secondary_person_state` are independent outputs and can contradict each other. Only these pairs are
+coherent: `ZERO+NONE`, `ONE+NONE`, `MULTIPLE+BACKGROUND`, `MULTIPLE+INTERFERING`,
+`MULTIPLE+UNCERTAIN`, `UNCERTAIN+UNCERTAIN`. Every other pair (e.g. `ONE+BACKGROUND`,
+`MULTIPLE+NONE`, `ZERO+BACKGROUND`, `UNCERTAIN+BACKGROUND`) is contradictory and **fails closed**
+(RETRY, no PASS, portrait forbidden) — values are never repaired or defaulted. One provider-
+independent predicate (`is_portrait_eligible_vlm_result`) is used by liveness promotion,
+`has_current_canonical_pass`, `/browser/portrait`, `/browser/submit` (via current PASS), the
+standalone `/transactions/{id}/portrait`, and cached-result eligibility.
 
 **Why this is needed:** MODNet portrait matting is not person-instance segmentation. When two
-people's bodies/shoulders overlap or touch, MODNet can preserve both in the foreground matte.
-Without the backend subject gate, a multiple-person capture could reach portrait processing.
-`MULTIPLE` is a **capture-quality failure → RETRY**, never a fraud finding.
+people's bodies/shoulders overlap or touch, MODNet can preserve both in the foreground matte — so an
+interfering second person must be rejected. A clearly distant background person is safely removed by
+matting and must NOT be treated as a failure. An interfering second person is a capture-quality
+failure → RETRY, never a fraud finding.
 
 **Customer surface:** the backend exposes only safe reason codes (`MULTIPLE_FACES`) — never VLM,
 Groq, model output, confidence, or prompt. The frontend maps `MULTIPLE_FACES` to
@@ -322,4 +342,5 @@ Groq, model output, confidence, or prompt. The frontend maps `MULTIPLE_FACES` to
 
 **Enforcement points:** `/api/v1/browser/liveness` (canonical decision + portrait gate),
 `/api/v1/browser/portrait`, `/api/v1/browser/submit` (via current-PASS binding), and the standalone
-`/api/v1/transactions/{id}/portrait` (requires a persisted LIVE + ONE VLM result).
+`/api/v1/transactions/{id}/portrait` (requires a persisted LIVE result with
+`secondary_person_state IN {NONE, BACKGROUND}`).

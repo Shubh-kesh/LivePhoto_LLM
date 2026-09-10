@@ -10,9 +10,9 @@ from app.providers.vision.local_provider import LocalVisionProvider
 from app.providers.vision.models import ImageInput, VisionEvaluationRequest
 
 VALID_JSON = (
-    '{"schema_version":"vlm-result-v2","classification":"SCREEN_REPLAY",'
+    '{"schema_version":"vlm-result-v3","classification":"SCREEN_REPLAY",'
     '"attack_medium":"MOBILE_SCREEN","self_reported_confidence":0.87,'
-    '"evidence_codes":["DEVICE_BORDER_VISIBLE"],"subject_count":"ONE"}'
+    '"evidence_codes":["DEVICE_BORDER_VISIBLE"],"subject_count":"ONE","secondary_person_state":"NONE"}'
 )
 
 
@@ -23,7 +23,7 @@ def _request(count: int = 1) -> VisionEvaluationRequest:
             for _ in range(count)
         ],
         prompt_id="prompt-1",
-        prompt_version="vlm-passive-v2",
+        prompt_version="vlm-passive-v3",
         provider_options={"frame_strategy": "single-quality-v1"},
     )
 

@@ -47,7 +47,11 @@ def _create_transaction(client: TestClient) -> str:
 
 
 def _persist_vlm(
-    client: TestClient, transaction_id: str, classification: str, subject_count: str = "ONE"
+    client: TestClient,
+    transaction_id: str,
+    classification: str,
+    subject_count: str = "ONE",
+    secondary_person_state: str = "NONE",
 ) -> None:
     store: TransactionFileStore = client.app.state.transaction_store
     import json as _json
@@ -66,6 +70,7 @@ def _persist_vlm(
                 "self_reported_confidence": 0.9,
                 "evidence_codes": [],
                 "subject_count": subject_count,
+                "secondary_person_state": secondary_person_state,
                 "latency_ms": 1,
                 "experiment_id": "e" * 32,
                 "request_id": "r" * 32,

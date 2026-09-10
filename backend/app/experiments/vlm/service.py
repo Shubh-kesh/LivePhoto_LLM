@@ -57,6 +57,8 @@ class ExperimentResult(BaseModel):
     evidence_codes: list[str] = Field(default_factory=list)
     #: Normalized visible-person category (ZERO|ONE|MULTIPLE|UNCERTAIN); None on provider error.
     subject_count: str | None = None
+    #: Authoritative additional-person interference category; None on provider error.
+    secondary_person_state: str | None = None
     latency_ms: int | None = None
     error: VlmErrorCode | None = None
 
@@ -152,6 +154,7 @@ class VlmEvaluationService:
             self_reported_confidence=assessment.self_reported_confidence,
             evidence_codes=list(assessment.evidence_codes),
             subject_count=assessment.subject_count,
+            secondary_person_state=assessment.secondary_person_state,
             provider_latency_ms=response.provider_latency_ms,
             total_latency_ms=total_latency_ms,
             input_tokens=usage.input_tokens if usage else None,
@@ -248,6 +251,8 @@ class VlmEvaluationService:
             prompt_version=PROMPT_VERSION,
             image_count=len(request.frames),
             classification=assessment.classification.value,
+            subject_count=assessment.subject_count.value,
+            secondary_person_state=assessment.secondary_person_state.value,
             latency_ms=latency_ms,
         )
         self._log_response_received(request, response, experiment_id, latency_ms)
@@ -263,5 +268,6 @@ class VlmEvaluationService:
             self_reported_confidence=assessment.self_reported_confidence,
             evidence_codes=list(assessment.evidence_codes),
             subject_count=assessment.subject_count.value,
+            secondary_person_state=assessment.secondary_person_state.value,
             latency_ms=latency_ms,
         )

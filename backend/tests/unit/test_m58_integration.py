@@ -22,6 +22,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from app.core.config import Settings
+from app.domain.decision import DecisionOutcome
 from app.experiments.vlm import liveness
 from app.factory import create_app
 from app.integrations.callback import build_callback_event_id
@@ -2743,6 +2744,7 @@ def _write_cached_evaluation(
     schema_version: str | None,
     prompt_version: str | None,
     subject_count: str | None,
+    secondary_person_state: str | None = None,
     outcome: str = "PASS",
     classification: str | None = "LIVE",
     portrait_allowed: bool = True,
@@ -2768,6 +2770,8 @@ def _write_cached_evaluation(
         payload["prompt_version"] = prompt_version
     if subject_count is not None:
         payload["subject_count"] = subject_count
+    if secondary_person_state is not None:
+        payload["secondary_person_state"] = secondary_person_state
     liveness.persist_evaluation(store, internal, identity, payload)
 
 
@@ -2790,22 +2794,16 @@ def test_is_current_evaluation_contract() -> None:
     # Fail-closed error records are reusable (never authorize PASS).
     assert liveness.is_current_evaluation({"error": "PROVIDER_TIMEOUT"}) is True
     current = {
-        "schema_version": "vlm-result-v2",
-        "prompt_version": "vlm-passive-v2",
+        "schema_version": "vlm-result-v3",
+        "prompt_version": "vlm-passive-v3",
         "subject_count": "ONE",
+        "secondary_person_state": "NONE",
     }
     assert liveness.is_current_evaluation(current) is True
-    # Legacy v1 (no subject_count) is never current.
+    # Legacy v1/v2 (no secondary_person_state) is never current.
     assert (
         liveness.is_current_evaluation(
             {"schema_version": "vlm-result-v1", "prompt_version": "vlm-passive-v1"}
-        )
-        is False
-    )
-    # Current schema but missing/unknown subject_count -> not reusable.
-    assert (
-        liveness.is_current_evaluation(
-            {"schema_version": "vlm-result-v2", "prompt_version": "vlm-passive-v2"}
         )
         is False
     )
@@ -2814,7 +2812,51 @@ def test_is_current_evaluation_contract() -> None:
             {
                 "schema_version": "vlm-result-v2",
                 "prompt_version": "vlm-passive-v2",
+                "subject_count": "ONE",
+            }
+        )
+        is False
+    )
+    # Current schema but missing/unknown subject_count -> not reusable.
+    assert (
+        liveness.is_current_evaluation(
+            {
+                "schema_version": "vlm-result-v3",
+                "prompt_version": "vlm-passive-v3",
+                "secondary_person_state": "NONE",
+            }
+        )
+        is False
+    )
+    assert (
+        liveness.is_current_evaluation(
+            {
+                "schema_version": "vlm-result-v3",
+                "prompt_version": "vlm-passive-v3",
                 "subject_count": "TWO",
+                "secondary_person_state": "NONE",
+            }
+        )
+        is False
+    )
+    # Missing/unknown secondary_person_state -> not reusable.
+    assert (
+        liveness.is_current_evaluation(
+            {
+                "schema_version": "vlm-result-v3",
+                "prompt_version": "vlm-passive-v3",
+                "subject_count": "ONE",
+            }
+        )
+        is False
+    )
+    assert (
+        liveness.is_current_evaluation(
+            {
+                "schema_version": "vlm-result-v3",
+                "prompt_version": "vlm-passive-v3",
+                "subject_count": "ONE",
+                "secondary_person_state": "MAYBE",
             }
         )
         is False
@@ -2823,9 +2865,10 @@ def test_is_current_evaluation_contract() -> None:
     assert (
         liveness.is_current_evaluation(
             {
-                "schema_version": "vlm-result-v2",
+                "schema_version": "vlm-result-v3",
                 "prompt_version": "vlm-passive-v1",
                 "subject_count": "ONE",
+                "secondary_person_state": "NONE",
             }
         )
         is False
@@ -2865,7 +2908,7 @@ def test_legacy_v1_pass_cache_not_reused_reevaluates_once(tmp_path, monkeypatch)
         assert calls[0] == 1
         identity = liveness.liveness_identity(key["attempt_id"], key["selected_sha256"])
         refreshed = liveness.read_evaluation(store, internal, identity)
-        assert refreshed["schema_version"] == "vlm-result-v2"
+        assert refreshed["schema_version"] == "vlm-result-v3"
         assert refreshed["subject_count"] == "ONE"
 
 
@@ -3013,9 +3056,10 @@ def test_malformed_cached_subject_count_reevaluated_no_default_one(tmp_path, mon
             internal,
             attempt_id=key["attempt_id"],
             selected_sha256=key["selected_sha256"],
-            schema_version="vlm-result-v2",
-            prompt_version="vlm-passive-v2",
+            schema_version="vlm-result-v3",
+            prompt_version="vlm-passive-v3",
             subject_count="TWO",
+            secondary_person_state="NONE",
             outcome="PASS",
         )
         res = client.post("/api/v1/browser/liveness", headers=bh)
@@ -3062,5 +3106,401 @@ def test_standalone_legacy_v1_cache_reevaluated(tmp_path, monkeypatch) -> None:
         assert res.json()["outcome"] == "PASS"
         identity = liveness.liveness_identity(key["attempt_id"], key["selected_sha256"])
         refreshed = liveness.read_evaluation(store, tx_id, identity)
-        assert refreshed["schema_version"] == "vlm-result-v2"
+        assert refreshed["schema_version"] == "vlm-result-v3"
         assert refreshed["subject_count"] == "ONE"
+
+
+# ------------------------------- secondary_person_state (background vs interfering, pre-M6 v3)
+def test_secondary_person_state_mapping_matrix() -> None:
+    m = liveness.map_classification_to_outcome
+    # Portrait-eligible coherent pairs.
+    assert m("LIVE", "ONE", "NONE") is DecisionOutcome.PASS
+    assert m("LIVE", "MULTIPLE", "BACKGROUND") is DecisionOutcome.PASS
+    # Coherent but NOT eligible -> RETRY.
+    assert m("LIVE", "MULTIPLE", "INTERFERING") is DecisionOutcome.RETRY
+    assert m("LIVE", "MULTIPLE", "UNCERTAIN") is DecisionOutcome.RETRY
+    assert m("LIVE", "UNCERTAIN", "UNCERTAIN") is DecisionOutcome.RETRY
+    assert m("LIVE", "ZERO", "NONE") is DecisionOutcome.RETRY
+    # Contradictory pairs -> inconsistent -> fail closed (never PASS).
+    assert m("LIVE", "ONE", "BACKGROUND") is DecisionOutcome.RETRY
+    assert m("LIVE", "ONE", "INTERFERING") is DecisionOutcome.RETRY
+    assert m("LIVE", "MULTIPLE", "NONE") is DecisionOutcome.RETRY
+    assert m("LIVE", "ZERO", "BACKGROUND") is DecisionOutcome.RETRY
+    assert m("LIVE", "ZERO", "INTERFERING") is DecisionOutcome.RETRY
+    assert m("LIVE", "UNCERTAIN", "BACKGROUND") is DecisionOutcome.RETRY
+    assert m("LIVE", "UNCERTAIN", "NONE") is DecisionOutcome.RETRY
+    # Missing/None person state -> fail closed, never PASS.
+    assert m("LIVE", "ONE", None) is DecisionOutcome.RETRY
+    assert m("LIVE", None, None) is DecisionOutcome.RETRY
+    # Attack classifications FAIL regardless of person state (even inconsistent).
+    assert m("SCREEN_REPLAY", "MULTIPLE", "BACKGROUND") is DecisionOutcome.FAIL
+    assert m("SCREEN_REPLAY", "ONE", "BACKGROUND") is DecisionOutcome.FAIL
+    assert m("PRINT_ATTACK", "MULTIPLE", "NONE") is DecisionOutcome.FAIL
+    assert m("UNCERTAIN", "ONE", "NONE") is DecisionOutcome.RETRY
+    # Coherence helper.
+    assert liveness.is_person_state_consistent("MULTIPLE", "BACKGROUND") is True
+    assert liveness.is_person_state_consistent("ZERO", "NONE") is True
+    assert liveness.is_person_state_consistent("ONE", "BACKGROUND") is False
+    assert liveness.is_person_state_consistent("MULTIPLE", "NONE") is False
+    # Reasons: interfering -> MULTIPLE_FACES; zero -> NO_FACE; background -> none.
+    assert liveness.interference_reasons("MULTIPLE", "INTERFERING") == ["MULTIPLE_FACES"]
+    assert liveness.interference_reasons("ZERO", "NONE") == ["NO_FACE"]
+    assert liveness.interference_reasons("MULTIPLE", "BACKGROUND") == []
+
+
+def test_secondary_live_multiple_background_pass_and_portrait(tmp_path) -> None:
+    app = _liveness_app(tmp_path, vlm_mock_behavior="live_multiple_background")
+    with TestClient(app) as client:
+        cookies = _active_cookies(client)
+        res = _capture_and_liveness(client, cookies, "a1")
+        assert res.status_code == 200, res.text
+        body = res.json()
+        assert body["classification"] == "LIVE"
+        assert body["outcome"] == "PASS"
+        assert body["portrait_allowed"] is True
+        # A distant/background second person must NOT produce a MULTIPLE_FACES retry.
+        assert body["reason_codes"] == []
+        store: TransactionFileStore = app.state.transaction_store
+        internal = _internal_tx_id(client, None)
+        assert liveness.has_current_canonical_pass(store, internal) is True
+        bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+        assert client.post("/api/v1/browser/portrait", headers=bh).status_code == 200
+
+
+def test_secondary_live_multiple_interfering_retry_multiple_faces(tmp_path) -> None:
+    app = _liveness_app(tmp_path, vlm_mock_behavior="live_multiple")
+    with TestClient(app) as client:
+        cookies = _active_cookies(client)
+        res = _capture_and_liveness(client, cookies, "a1")
+        assert res.status_code == 200
+        body = res.json()
+        assert body["outcome"] == "RETRY"
+        assert body["reason_codes"] == ["MULTIPLE_FACES"]
+        assert body["portrait_allowed"] is False
+        bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+        assert client.post("/api/v1/browser/portrait", headers=bh).status_code == 412
+
+
+def test_secondary_live_multiple_uncertain_retry(tmp_path) -> None:
+    app = _liveness_app(tmp_path, vlm_mock_behavior="live_multiple_uncertain")
+    with TestClient(app) as client:
+        cookies = _active_cookies(client)
+        res = _capture_and_liveness(client, cookies, "a1")
+        assert res.status_code == 200
+        body = res.json()
+        assert body["classification"] == "LIVE"
+        assert body["outcome"] == "RETRY"
+        assert body["portrait_allowed"] is False
+
+
+def test_secondary_attack_still_fails_regardless_of_person_state(tmp_path) -> None:
+    # SCREEN_REPLAY/PRINT_ATTACK FAIL regardless of secondary_person_state.
+    for behavior in ("screen_replay", "print"):
+        sub = tmp_path / behavior
+        sub.mkdir(parents=True, exist_ok=True)
+        app = _liveness_app(sub, vlm_mock_behavior=behavior)
+        with TestClient(app) as client:
+            cookies = _active_cookies(client)
+            res = _capture_and_liveness(client, cookies, "a1")
+            assert res.json()["outcome"] == "FAIL"
+            assert res.json()["portrait_allowed"] is False
+            bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+            assert client.post("/api/v1/browser/portrait", headers=bh).status_code == 412
+
+
+def test_secondary_current_background_cache_reused_idempotently(tmp_path, monkeypatch) -> None:
+    calls = _counting_service(monkeypatch)
+    app = _liveness_app(tmp_path, vlm_mock_behavior="live_multiple_background")
+    with TestClient(app) as client:
+        cookies = _active_cookies(client)
+        bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+        client.post(
+            "/api/v1/browser/capture",
+            data={"attempt_id": "bg-1"},
+            files={"selected_image": ("sel.jpg", _jpeg_bytes(), "image/jpeg")},
+            headers=bh,
+        )
+        first = client.post("/api/v1/browser/liveness", headers=bh)
+        second = client.post("/api/v1/browser/liveness", headers=bh)
+        assert first.status_code == 200 and second.status_code == 200
+        assert first.json() == second.json()
+        assert first.json()["outcome"] == "PASS"
+        assert calls[0] == 1  # current v3 BACKGROUND cache reused
+        store: TransactionFileStore = app.state.transaction_store
+        internal = _internal_tx_id(client, None)
+        identity = liveness.expected_liveness_identity(store, internal)
+        cached = liveness.read_evaluation(store, internal, identity)
+        assert cached["secondary_person_state"] == "BACKGROUND"
+        assert cached["subject_count"] == "MULTIPLE"
+
+
+def test_secondary_legacy_cache_missing_state_not_reused_as_pass(tmp_path, monkeypatch) -> None:
+    # v2 cache (subject_count ONE, no secondary_person_state) must not authorize PASS.
+    calls = _counting_service(monkeypatch)
+    app = _liveness_app(tmp_path, vlm_mock_behavior="live")
+    with TestClient(app) as client:
+        cookies = _active_cookies(client)
+        bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+        client.post(
+            "/api/v1/browser/capture",
+            data={"attempt_id": "v2-1"},
+            files={"selected_image": ("sel.jpg", _jpeg_bytes(), "image/jpeg")},
+            headers=bh,
+        )
+        store: TransactionFileStore = app.state.transaction_store
+        internal = _internal_tx_id(client, None)
+        key = liveness.current_capture_key(store, internal)
+        assert key is not None
+        _write_cached_evaluation(
+            store,
+            internal,
+            attempt_id=key["attempt_id"],
+            selected_sha256=key["selected_sha256"],
+            schema_version="vlm-result-v2",
+            prompt_version="vlm-passive-v2",
+            subject_count="ONE",
+            secondary_person_state=None,
+            outcome="PASS",
+        )
+        res = client.post("/api/v1/browser/liveness", headers=bh)
+        assert res.status_code == 200, res.text
+        assert calls[0] == 1  # re-evaluated under the current contract
+        identity = liveness.expected_liveness_identity(store, internal)
+        refreshed = liveness.read_evaluation(store, internal, identity)
+        assert refreshed["schema_version"] == "vlm-result-v3"
+        assert refreshed["secondary_person_state"] in {"NONE", "BACKGROUND"}
+
+
+def test_secondary_standalone_portrait_background_allowed_interfering_blocked(tmp_path) -> None:
+    for behavior, expected_status in (
+        ("live_multiple_background", 200),
+        ("live_multiple", 500),
+    ):
+        sub = tmp_path / behavior
+        sub.mkdir(parents=True, exist_ok=True)
+        app = _liveness_app(sub, vlm_mock_behavior=behavior)
+        with TestClient(app) as client:
+            tx_id = client.post(
+                "/api/v1/transactions",
+                files={"image": ("sel.jpg", _jpeg_bytes(), "image/jpeg")},
+                data={
+                    "capture_config_version": "capture-v1",
+                    "quality_config_version": "quality-v1",
+                },
+            ).json()["transaction_id"]
+            liv = client.post(f"/api/v1/transactions/{tx_id}/liveness")
+            assert liv.status_code == 200
+            portrait = client.post(f"/api/v1/transactions/{tx_id}/portrait")
+            assert portrait.status_code == expected_status, (behavior, portrait.text)
+
+
+# ---------------------------- person-state consistency / parity at every boundary (pre-M6 v3)
+def _persist_vlm_result(
+    store: TransactionFileStore,
+    tx_id: str,
+    classification: str,
+    subject_count: str,
+    secondary_person_state: str,
+) -> None:
+    import json as _json
+
+    from app.transactions import ArtifactType
+
+    store.write_artifact(
+        tx_id,
+        ArtifactType.VLM_RESULT,
+        _json.dumps(
+            {
+                "provider": "mock",
+                "model": "mock-vision-v1",
+                "classification": classification,
+                "attack_medium": "NONE",
+                "self_reported_confidence": 0.9,
+                "evidence_codes": [],
+                "subject_count": subject_count,
+                "secondary_person_state": secondary_person_state,
+                "latency_ms": 1,
+                "request_id": "r" * 32,
+            }
+        ).encode(),
+        content_type="application/json",
+    )
+
+
+def test_secondary_inconsistent_one_background_retry_no_pass(tmp_path) -> None:
+    app = _liveness_app(tmp_path, vlm_mock_behavior="live_one_background")
+    with TestClient(app) as client:
+        cookies = _active_cookies(client)
+        res = _capture_and_liveness(client, cookies, "a1")
+        assert res.status_code == 200, res.text
+        body = res.json()
+        assert body["classification"] == "LIVE"
+        assert body["outcome"] == "RETRY"
+        assert body["portrait_allowed"] is False
+        store: TransactionFileStore = app.state.transaction_store
+        internal = _internal_tx_id(client, None)
+        assert liveness.has_current_canonical_pass(store, internal) is False
+        bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+        assert client.post("/api/v1/browser/portrait", headers=bh).status_code == 412
+
+
+def test_secondary_inconsistent_multiple_none_retry_no_pass(tmp_path) -> None:
+    app = _liveness_app(tmp_path, vlm_mock_behavior="live_multiple_none")
+    with TestClient(app) as client:
+        cookies = _active_cookies(client)
+        res = _capture_and_liveness(client, cookies, "a1")
+        body = res.json()
+        assert body["outcome"] == "RETRY"
+        assert body["portrait_allowed"] is False
+
+
+def test_secondary_inconsistent_uncertain_background_retry_no_pass(tmp_path) -> None:
+    app = _liveness_app(tmp_path, vlm_mock_behavior="live_uncertain_background")
+    with TestClient(app) as client:
+        cookies = _active_cookies(client)
+        res = _capture_and_liveness(client, cookies, "a1")
+        body = res.json()
+        assert body["outcome"] == "RETRY"
+        assert body["portrait_allowed"] is False
+
+
+def test_secondary_zero_none_never_pass_browser_and_standalone(tmp_path) -> None:
+    app = _liveness_app(tmp_path, vlm_mock_behavior="live_zero")
+    with TestClient(app) as client:
+        cookies = _active_cookies(client)
+        _capture_and_liveness(client, cookies, "a1")
+        store: TransactionFileStore = app.state.transaction_store
+        internal = _internal_tx_id(client, None)
+        assert liveness.has_current_canonical_pass(store, internal) is False
+        bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+        assert client.post("/api/v1/browser/portrait", headers=bh).status_code == 412
+    # Standalone path with a persisted LIVE + ZERO + NONE result is likewise blocked.
+    sub = tmp_path / "standalone"
+    sub.mkdir()
+    app2 = _liveness_app(sub, vlm_mock_behavior="live")
+    with TestClient(app2) as client:
+        tx_id = client.post(
+            "/api/v1/transactions",
+            files={"image": ("sel.jpg", _jpeg_bytes(), "image/jpeg")},
+            data={
+                "capture_config_version": "capture-v1",
+                "quality_config_version": "quality-v1",
+            },
+        ).json()["transaction_id"]
+        _persist_vlm_result(client.app.state.transaction_store, tx_id, "LIVE", "ZERO", "NONE")
+        portrait = client.post(f"/api/v1/transactions/{tx_id}/portrait")
+        assert portrait.status_code == 500
+        assert portrait.json()["error"]["code"] == "PORTRAIT_PROCESSING_FAILED"
+
+
+def test_secondary_canonical_metadata_requires_coherent_pair(tmp_path) -> None:
+    app = _liveness_app(tmp_path, vlm_mock_behavior="live")
+    from app.transactions.decisions import build_decision, write_decision
+
+    with TestClient(app) as client:
+        cookies = _active_cookies(client)
+        _capture_and_liveness(client, cookies, "a1")
+        store: TransactionFileStore = app.state.transaction_store
+        internal = _internal_tx_id(client, None)
+        key = liveness.current_capture_key(store, internal)
+        assert key is not None
+        identity = liveness.liveness_identity(key["attempt_id"], key["selected_sha256"])
+
+        def decide(sc: str, sps: str, outcome: str = "PASS"):
+            return build_decision(
+                internal,
+                source=liveness.LIVENESS_DECISION_SOURCE,
+                version=liveness.LIVENESS_DECISION_VERSION,
+                metadata={
+                    "attempt_id": key["attempt_id"],
+                    "selected_sha256": key["selected_sha256"],
+                    "liveness_identity": identity,
+                    "classification": "LIVE",
+                    "subject_count": sc,
+                    "secondary_person_state": sps,
+                    "schema_version": liveness.VLM_SCHEMA_VERSION,
+                },
+            )
+
+        # Coherent eligible pairs are current.
+        write_decision(store, internal, decide("ONE", "NONE"))
+        assert liveness.has_current_canonical_pass(store, internal) is True
+        write_decision(store, internal, decide("MULTIPLE", "BACKGROUND"))
+        assert liveness.has_current_canonical_pass(store, internal) is True
+        # Coherent but not eligible.
+        write_decision(store, internal, decide("ZERO", "NONE"))
+        assert liveness.has_current_canonical_pass(store, internal) is False
+        write_decision(store, internal, decide("MULTIPLE", "INTERFERING"))
+        assert liveness.has_current_canonical_pass(store, internal) is False
+        # Contradictory pairs.
+        write_decision(store, internal, decide("ONE", "BACKGROUND"))
+        assert liveness.has_current_canonical_pass(store, internal) is False
+        write_decision(store, internal, decide("MULTIPLE", "NONE"))
+        assert liveness.has_current_canonical_pass(store, internal) is False
+
+
+def test_secondary_standalone_portrait_uses_same_eligibility_rule(tmp_path) -> None:
+    cases = [
+        ("LIVE", "ONE", "NONE", 200),
+        ("LIVE", "MULTIPLE", "BACKGROUND", 200),
+        ("LIVE", "MULTIPLE", "INTERFERING", 500),
+        ("LIVE", "ONE", "BACKGROUND", 500),  # inconsistent
+        ("LIVE", "MULTIPLE", "NONE", 500),  # inconsistent
+        ("LIVE", "ZERO", "NONE", 500),
+        ("SCREEN_REPLAY", "ONE", "NONE", 500),
+    ]
+    for index, (cls, sc, sps, expected) in enumerate(cases):
+        sub = tmp_path / f"case{index}"
+        sub.mkdir()
+        app = _liveness_app(sub, vlm_mock_behavior="live")
+        with TestClient(app) as client:
+            tx_id = client.post(
+                "/api/v1/transactions",
+                files={"image": ("sel.jpg", _jpeg_bytes(), "image/jpeg")},
+                data={
+                    "capture_config_version": "capture-v1",
+                    "quality_config_version": "quality-v1",
+                },
+            ).json()["transaction_id"]
+            _persist_vlm_result(client.app.state.transaction_store, tx_id, cls, sc, sps)
+            portrait = client.post(f"/api/v1/transactions/{tx_id}/portrait")
+            assert portrait.status_code == expected, (cls, sc, sps, portrait.text)
+
+
+def test_secondary_inconsistent_v3_cache_not_reused(tmp_path, monkeypatch) -> None:
+    calls = _counting_service(monkeypatch)
+    app = _liveness_app(tmp_path, vlm_mock_behavior="live")
+    with TestClient(app) as client:
+        cookies = _active_cookies(client)
+        bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+        client.post(
+            "/api/v1/browser/capture",
+            data={"attempt_id": "inc-1"},
+            files={"selected_image": ("sel.jpg", _jpeg_bytes(), "image/jpeg")},
+            headers=bh,
+        )
+        store: TransactionFileStore = app.state.transaction_store
+        internal = _internal_tx_id(client, None)
+        key = liveness.current_capture_key(store, internal)
+        assert key is not None
+        # Contradictory current-schema cache with outcome PASS: must NOT be reused as PASS.
+        _write_cached_evaluation(
+            store,
+            internal,
+            attempt_id=key["attempt_id"],
+            selected_sha256=key["selected_sha256"],
+            schema_version="vlm-result-v3",
+            prompt_version="vlm-passive-v3",
+            subject_count="ONE",
+            secondary_person_state="BACKGROUND",
+            outcome="PASS",
+        )
+        res = client.post("/api/v1/browser/liveness", headers=bh)
+        assert res.status_code == 200, res.text
+        assert calls[0] == 1  # inconsistent cache -> re-evaluated once
+        identity = liveness.expected_liveness_identity(store, internal)
+        refreshed = liveness.read_evaluation(store, internal, identity)
+        # The refreshed record is the coherent fresh one (mock live -> ONE+NONE), not the bad cache.
+        assert refreshed["subject_count"] == "ONE"
+        assert refreshed["secondary_person_state"] == "NONE"
+        assert res.json()["outcome"] == "PASS"

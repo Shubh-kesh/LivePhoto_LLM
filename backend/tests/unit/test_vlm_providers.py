@@ -27,7 +27,7 @@ def _request(strategy: str = "single-quality-v1") -> VisionEvaluationRequest:
     return VisionEvaluationRequest(
         images=[ImageInput(bytes=b"\xff\xd8\xfffakejpeg", mime_type="image/jpeg", sequence=0)],
         prompt_id="passive-liveness",
-        prompt_version="vlm-passive-v2",
+        prompt_version="vlm-passive-v3",
         temperature=0.0,
         provider_options={"frame_strategy": strategy},
     )
@@ -48,6 +48,7 @@ VALID_ASSESSMENT_JSON = json.dumps(
         "self_reported_confidence": 0.86,
         "evidence_codes": ["DEVICE_BORDER_VISIBLE"],
         "subject_count": "ONE",
+        "secondary_person_state": "NONE",
     }
 )
 

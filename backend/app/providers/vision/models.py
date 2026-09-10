@@ -10,9 +10,9 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
-#: Bumped to v2 when ``subject_count`` was added to the normalized schema (pre-M6 single-person
-#: enforcement). Immutable per version.
-VLM_SCHEMA_VERSION = "vlm-result-v2"
+#: Bumped to v3 when ``secondary_person_state`` was added to the normalized schema (pre-M6
+#: background-vs-interfering second-person semantics). Immutable per version.
+VLM_SCHEMA_VERSION = "vlm-result-v3"
 
 
 class VlmClassification(StrEnum):
@@ -26,15 +26,33 @@ class VlmClassification(StrEnum):
 class SubjectCount(StrEnum):
     """Category of how many meaningful visible persons/faces are in the capture.
 
-    A semantic category rather than a raw, hallucination-prone integer (pre-M6 single-person
-    enforcement). ``MULTIPLE`` includes a second person anywhere in the frame — beside, behind,
-    near the edge, or overlapping/touching the primary person. Tiny ambiguous shapes must not be
-    classified as MULTIPLE.
+    A semantic category rather than a raw, hallucination-prone integer. Retained for evidence /
+    diagnostics; the authoritative multi-person gate is ``secondary_person_state`` (a distant
+    background person must NOT be treated the same as an adjacent/interfering one).
     """
 
     ZERO = "ZERO"
     ONE = "ONE"
     MULTIPLE = "MULTIPLE"
+    UNCERTAIN = "UNCERTAIN"
+
+
+class SecondaryPersonState(StrEnum):
+    """Whether an additional person can interfere with the primary portrait/matting region.
+
+    The authoritative multi-person gate (pre-M6, background-vs-interfering semantics):
+    - NONE: no meaningful secondary person visible.
+    - BACKGROUND: additional people may be visible but are clearly distant / background /
+      non-interfering with the primary portrait subject.
+    - INTERFERING: a second person is close, large, adjacent, overlapping, touching, or otherwise
+      likely to contaminate the primary portrait/matting region.
+    - UNCERTAIN: cannot reliably determine whether the additional person is safely background or
+      interfering (fail closed).
+    """
+
+    NONE = "NONE"
+    BACKGROUND = "BACKGROUND"
+    INTERFERING = "INTERFERING"
     UNCERTAIN = "UNCERTAIN"
 
 
@@ -85,8 +103,11 @@ class VlmAssessment(BaseModel):
     self_reported_confidence: float = Field(ge=0.0, le=1.0)
     evidence_codes: list[str] = Field(default_factory=list, max_length=20)
     #: REQUIRED: a missing/invalid subject_count is a schema failure (fail closed). Never defaulted
-    #: to ONE.
+    #: to ONE. Evidence/diagnostics category.
     subject_count: SubjectCount
+    #: REQUIRED: authoritative additional-person interference category. Missing/invalid -> schema
+    #: failure (fail closed); never defaulted to NONE.
+    secondary_person_state: SecondaryPersonState
 
 
 class TokenUsage(BaseModel):
