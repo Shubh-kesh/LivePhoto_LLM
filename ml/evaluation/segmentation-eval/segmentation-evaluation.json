@@ -1,0 +1,940 @@
+{
+  "schema": "segmentation-evaluation-v1",
+  "generated_at": "2026-09-11T04:32:49.502226+00:00",
+  "integrity_version": "portrait-matte-integrity-v1",
+  "refinement_version": "matte-refinement-v3",
+  "crop_version": "passport-crop-v3",
+  "background_color": "#FFFFFF",
+  "device": "mps",
+  "models": [
+    {
+      "key": "modnet",
+      "name": "MODNet photographic portrait matting (ONNX)",
+      "repo": "ZHKKKe/MODNet (weights mirror: DavG25/modnet-pretrained-models)",
+      "code_license": "Apache-2.0",
+      "weights_license": "Apache-2.0",
+      "commercial_use": "Permitted (permissive, attribution/notice).",
+      "source": "https://huggingface.co/DavG25/modnet-pretrained-models",
+      "runtime": "onnxruntime (CPU)",
+      "revision": null,
+      "weights_bytes": 25888640,
+      "checkpoint_sha256": "07c308cf0fc7e6e8b2065a12ed7fc07e1de8febb7dc7839d7b7f15dd66584df9",
+      "load_ms": 252,
+      "license_notes": ""
+    },
+    {
+      "key": "birefnet",
+      "name": "BiRefNet dichotomous image segmentation",
+      "repo": "ZhengPeng7/BiRefNet",
+      "code_license": "MIT",
+      "weights_license": "MIT (Hugging Face model card)",
+      "commercial_use": "Permitted (permissive, attribution/notice).",
+      "source": "https://huggingface.co/ZhengPeng7/BiRefNet",
+      "runtime": "torch + transformers (trust_remote_code)",
+      "revision": "e2bf8e4460fc8fa32bba5ea4d94b3233d367b0e4",
+      "weights_bytes": 444473596,
+      "checkpoint_sha256": "9ab37426bf4de0567af6b5d21b16151357149139362e6e8992021b8ce356a154",
+      "load_ms": 4953,
+      "license_notes": ""
+    },
+    {
+      "key": "sam2",
+      "name": "SAM 2.1 (Hierarchical Image Segmentation, promptable)",
+      "repo": "facebook/sam2.1-hiera-large",
+      "code_license": "Apache-2.0",
+      "weights_license": "Apache-2.0",
+      "commercial_use": "Permitted (permissive, attribution/notice).",
+      "source": "https://huggingface.co/facebook/sam2.1-hiera-large",
+      "runtime": "torch + transformers (Sam2Model, box prompt)",
+      "revision": "665f8e2ad61cf5f53d65644ff27c8ee525124610",
+      "weights_bytes": 897897416,
+      "checkpoint_sha256": "dc407dce21301fd94abb395c5099b4f2c455fdc8a8f261ac3d0ea6d4cd197230",
+      "load_ms": 9078,
+      "license_notes": ""
+    }
+  ],
+  "cases": [
+    {
+      "name": "A-known-failure-LP-20260910T150524236Z-7B4136",
+      "image": "backend/local-data/file-storage/transactions/LP-20260910T150524236Z-7B4136/capture/selected-original.jpg",
+      "face_box": [
+        0.36,
+        0.36,
+        0.34,
+        0.26
+      ],
+      "notes": "Confirmed real MODNet failure: 720x1280, harsh lighting; raw matte fragmented in primary face/head. Production face box from the task brief.",
+      "width": null,
+      "height": null
+    },
+    {
+      "name": "B-healthy-LP-20260910T150406247Z-A74038",
+      "image": "backend/local-data/file-storage/transactions/LP-20260910T150406247Z-A74038/capture/selected-original.jpg",
+      "face_box": [
+        0.189,
+        0.334,
+        0.61,
+        0.343
+      ],
+      "notes": "Healthy portrait capture (720x1280); portrait SUCCESS. Legacy capture has NO persisted face box -> approximate OpenCV Haar geometry (documented; guidance only).",
+      "width": null,
+      "height": null
+    },
+    {
+      "name": "B-healthy-LP-20260911T032327577Z-C6BF3D",
+      "image": "backend/local-data/file-storage/transactions/LP-20260911T032327577Z-C6BF3D/capture/selected-original.jpg",
+      "face_box": [
+        0.389062,
+        0.365278,
+        0.2375,
+        0.422222
+      ],
+      "notes": "Healthy capture (1280x720) with PERSISTED production face box; portrait SUCCESS.",
+      "width": null,
+      "height": null
+    },
+    {
+      "name": "B-healthy-LP-20260911T032414363Z-BA851E",
+      "image": "backend/local-data/file-storage/transactions/LP-20260911T032414363Z-BA851E/capture/selected-original.jpg",
+      "face_box": [
+        0.386719,
+        0.376389,
+        0.242188,
+        0.430556
+      ],
+      "notes": "Healthy capture (1280x720) with PERSISTED production face box; portrait SUCCESS.",
+      "width": null,
+      "height": null
+    }
+  ],
+  "results": [
+    {
+      "case": "A-known-failure-LP-20260910T150524236Z-7B4136",
+      "model": "modnet",
+      "status": "OK",
+      "input_dimensions": {
+        "width": 720,
+        "height": 1280
+      },
+      "output_dimensions": {
+        "width": 716,
+        "height": 955
+      },
+      "inference_ms": 162,
+      "alpha_stats": {
+        "min": 0.0,
+        "max": 1.0,
+        "mean": 0.2257,
+        "shape": [
+          1280,
+          720
+        ]
+      },
+      "raw_integrity": {
+        "ok": false,
+        "reason": "face_retention_low",
+        "has_face_box": true,
+        "face_retention": 0.23300851872280443,
+        "head_retention": 0.16807587848634345,
+        "left_retention": 0.11566484517304189,
+        "right_retention": 0.3493981786664713,
+        "balance": 0.33104020637569864,
+        "component_face_overlap": 0.05677514248942821,
+        "foreground_ratio": 0.22591254340277778
+      },
+      "refined_integrity": {
+        "ok": false,
+        "reason": "face_retention_low",
+        "has_face_box": true,
+        "face_retention": 0.23300851872280443,
+        "head_retention": 0.16807587848634345,
+        "left_retention": 0.11566484517304189,
+        "right_retention": 0.3493981786664713,
+        "balance": 0.33104020637569864,
+        "component_face_overlap": 0.05677514248942821,
+        "foreground_ratio": 0.22591254340277778
+      },
+      "refinement_action": "reverted_to_raw",
+      "crop_box": {
+        "x0": 4,
+        "y0": 325,
+        "x1": 720,
+        "y1": 1280,
+        "width": 716,
+        "height": 955,
+        "normalized": [
+          0.0056,
+          0.2539,
+          1.0,
+          1.0
+        ]
+      },
+      "outputs": {
+        "original": "A-known-failure-LP-20260910T150524236Z-7B4136/modnet/original.jpg",
+        "alpha": "A-known-failure-LP-20260910T150524236Z-7B4136/modnet/alpha.png",
+        "foreground_mask": "A-known-failure-LP-20260910T150524236Z-7B4136/modnet/foreground-mask.png",
+        "white_composite": "A-known-failure-LP-20260910T150524236Z-7B4136/modnet/white-composite.jpg"
+      },
+      "error": null
+    },
+    {
+      "case": "B-healthy-LP-20260910T150406247Z-A74038",
+      "model": "modnet",
+      "status": "OK",
+      "input_dimensions": {
+        "width": 720,
+        "height": 1280
+      },
+      "output_dimensions": {
+        "width": 720,
+        "height": 960
+      },
+      "inference_ms": 187,
+      "alpha_stats": {
+        "min": 0.0,
+        "max": 1.0,
+        "mean": 0.4879,
+        "shape": [
+          1280,
+          720
+        ]
+      },
+      "raw_integrity": {
+        "ok": true,
+        "reason": null,
+        "has_face_box": true,
+        "face_retention": 0.8297798371739458,
+        "head_retention": 0.5075406898611319,
+        "left_retention": 0.8031224971656213,
+        "right_retention": 0.8563160074549596,
+        "balance": 0.9378809810557744,
+        "component_face_overlap": 0.8297694594776905,
+        "foreground_ratio": 0.4900249565972222
+      },
+      "refined_integrity": {
+        "ok": true,
+        "reason": null,
+        "has_face_box": true,
+        "face_retention": 0.8354097373923962,
+        "head_retention": 0.509287347830529,
+        "left_retention": 0.8095401545646498,
+        "right_retention": 0.8611617312072893,
+        "balance": 0.9400558864009555,
+        "component_face_overlap": 0.8354097373923962,
+        "foreground_ratio": 0.4913780381944444
+      },
+      "refinement_action": "refined",
+      "crop_box": {
+        "x0": 0,
+        "y0": 254,
+        "x1": 720,
+        "y1": 1214,
+        "width": 720,
+        "height": 960,
+        "normalized": [
+          0.0,
+          0.1984,
+          1.0,
+          0.9484
+        ]
+      },
+      "outputs": {
+        "original": "B-healthy-LP-20260910T150406247Z-A74038/modnet/original.jpg",
+        "alpha": "B-healthy-LP-20260910T150406247Z-A74038/modnet/alpha.png",
+        "foreground_mask": "B-healthy-LP-20260910T150406247Z-A74038/modnet/foreground-mask.png",
+        "white_composite": "B-healthy-LP-20260910T150406247Z-A74038/modnet/white-composite.jpg"
+      },
+      "error": null
+    },
+    {
+      "case": "B-healthy-LP-20260911T032327577Z-C6BF3D",
+      "model": "modnet",
+      "status": "OK",
+      "input_dimensions": {
+        "width": 1280,
+        "height": 720
+      },
+      "output_dimensions": {
+        "width": 540,
+        "height": 720
+      },
+      "inference_ms": 175,
+      "alpha_stats": {
+        "min": 0.0,
+        "max": 1.0,
+        "mean": 0.2965,
+        "shape": [
+          720,
+          1280
+        ]
+      },
+      "raw_integrity": {
+        "ok": true,
+        "reason": null,
+        "has_face_box": true,
+        "face_retention": 0.9723099896121884,
+        "head_retention": 0.712061220140016,
+        "left_retention": 0.9680358379501385,
+        "right_retention": 0.9765841412742382,
+        "balance": 0.991246731374374,
+        "component_face_overlap": 0.9723099896121884,
+        "foreground_ratio": 0.2972330729166667
+      },
+      "refined_integrity": {
+        "ok": true,
+        "reason": null,
+        "has_face_box": true,
+        "face_retention": 0.9753938711911357,
+        "head_retention": 0.7151312445690489,
+        "left_retention": 0.9704163781163435,
+        "right_retention": 0.980371364265928,
+        "balance": 0.9898456987704466,
+        "component_face_overlap": 0.9753938711911357,
+        "foreground_ratio": 0.2985492621527778
+      },
+      "refinement_action": "refined",
+      "crop_box": {
+        "x0": 394,
+        "y0": 0,
+        "x1": 934,
+        "y1": 720,
+        "width": 540,
+        "height": 720,
+        "normalized": [
+          0.3078,
+          0.0,
+          0.7297,
+          1.0
+        ]
+      },
+      "outputs": {
+        "original": "B-healthy-LP-20260911T032327577Z-C6BF3D/modnet/original.jpg",
+        "alpha": "B-healthy-LP-20260911T032327577Z-C6BF3D/modnet/alpha.png",
+        "foreground_mask": "B-healthy-LP-20260911T032327577Z-C6BF3D/modnet/foreground-mask.png",
+        "white_composite": "B-healthy-LP-20260911T032327577Z-C6BF3D/modnet/white-composite.jpg"
+      },
+      "error": null
+    },
+    {
+      "case": "B-healthy-LP-20260911T032414363Z-BA851E",
+      "model": "modnet",
+      "status": "OK",
+      "input_dimensions": {
+        "width": 1280,
+        "height": 720
+      },
+      "output_dimensions": {
+        "width": 540,
+        "height": 720
+      },
+      "inference_ms": 155,
+      "alpha_stats": {
+        "min": 0.0,
+        "max": 1.0,
+        "mean": 0.3103,
+        "shape": [
+          720,
+          1280
+        ]
+      },
+      "raw_integrity": {
+        "ok": true,
+        "reason": null,
+        "has_face_box": true,
+        "face_retention": 0.9719146722164412,
+        "head_retention": 0.7300986013104839,
+        "left_retention": 0.9853069719042664,
+        "right_retention": 0.958522372528616,
+        "balance": 0.9728159851301115,
+        "component_face_overlap": 0.9719146722164412,
+        "foreground_ratio": 0.3110883246527778
+      },
+      "refined_integrity": {
+        "ok": true,
+        "reason": null,
+        "has_face_box": true,
+        "face_retention": 0.975567117585848,
+        "head_retention": 0.7328117124495968,
+        "left_retention": 0.9873881373569199,
+        "right_retention": 0.9637460978147763,
+        "balance": 0.9760559817890566,
+        "component_face_overlap": 0.975567117585848,
+        "foreground_ratio": 0.31234049479166665
+      },
+      "refinement_action": "refined",
+      "crop_box": {
+        "x0": 382,
+        "y0": 0,
+        "x1": 922,
+        "y1": 720,
+        "width": 540,
+        "height": 720,
+        "normalized": [
+          0.2984,
+          0.0,
+          0.7203,
+          1.0
+        ]
+      },
+      "outputs": {
+        "original": "B-healthy-LP-20260911T032414363Z-BA851E/modnet/original.jpg",
+        "alpha": "B-healthy-LP-20260911T032414363Z-BA851E/modnet/alpha.png",
+        "foreground_mask": "B-healthy-LP-20260911T032414363Z-BA851E/modnet/foreground-mask.png",
+        "white_composite": "B-healthy-LP-20260911T032414363Z-BA851E/modnet/white-composite.jpg"
+      },
+      "error": null
+    },
+    {
+      "case": "A-known-failure-LP-20260910T150524236Z-7B4136",
+      "model": "birefnet",
+      "status": "OK",
+      "input_dimensions": {
+        "width": 720,
+        "height": 1280
+      },
+      "output_dimensions": {
+        "width": 720,
+        "height": 960
+      },
+      "inference_ms": 3532,
+      "alpha_stats": {
+        "min": 0.0,
+        "max": 1.0,
+        "mean": 0.4334,
+        "shape": [
+          1280,
+          720
+        ]
+      },
+      "raw_integrity": {
+        "ok": true,
+        "reason": null,
+        "has_face_box": true,
+        "face_retention": 0.9857694429123001,
+        "head_retention": 0.5128692484358913,
+        "left_retention": 1.0,
+        "right_retention": 0.971654581410679,
+        "balance": 0.971654581410679,
+        "component_face_overlap": 0.9857694429123001,
+        "foreground_ratio": 0.4351226128472222
+      },
+      "refined_integrity": {
+        "ok": true,
+        "reason": null,
+        "has_face_box": true,
+        "face_retention": 0.9867867867867868,
+        "head_retention": 0.5147606203327137,
+        "left_retention": 1.0,
+        "right_retention": 0.973680998071242,
+        "balance": 0.973680998071242,
+        "component_face_overlap": 0.9867867867867868,
+        "foreground_ratio": 0.43571180555555555
+      },
+      "refinement_action": "refined",
+      "crop_box": {
+        "x0": 0,
+        "y0": 320,
+        "x1": 720,
+        "y1": 1280,
+        "width": 720,
+        "height": 960,
+        "normalized": [
+          0.0,
+          0.25,
+          1.0,
+          1.0
+        ]
+      },
+      "outputs": {
+        "original": "A-known-failure-LP-20260910T150524236Z-7B4136/birefnet/original.jpg",
+        "alpha": "A-known-failure-LP-20260910T150524236Z-7B4136/birefnet/alpha.png",
+        "foreground_mask": "A-known-failure-LP-20260910T150524236Z-7B4136/birefnet/foreground-mask.png",
+        "white_composite": "A-known-failure-LP-20260910T150524236Z-7B4136/birefnet/white-composite.jpg"
+      },
+      "error": null
+    },
+    {
+      "case": "B-healthy-LP-20260910T150406247Z-A74038",
+      "model": "birefnet",
+      "status": "OK",
+      "input_dimensions": {
+        "width": 720,
+        "height": 1280
+      },
+      "output_dimensions": {
+        "width": 720,
+        "height": 960
+      },
+      "inference_ms": 4083,
+      "alpha_stats": {
+        "min": 0.0,
+        "max": 1.0,
+        "mean": 0.548,
+        "shape": [
+          1280,
+          720
+        ]
+      },
+      "raw_integrity": {
+        "ok": true,
+        "reason": null,
+        "has_face_box": true,
+        "face_retention": 0.830563353241214,
+        "head_retention": 0.531107801607947,
+        "left_retention": 0.7977865842876608,
+        "right_retention": 0.8631911368813419,
+        "balance": 0.9242293510681958,
+        "component_face_overlap": 0.8305529755449588,
+        "foreground_ratio": 0.5499674479166666
+      },
+      "refined_integrity": {
+        "ok": true,
+        "reason": null,
+        "has_face_box": true,
+        "face_retention": 0.8336351513327557,
+        "head_retention": 0.5325911837979299,
+        "left_retention": 0.8011150289678701,
+        "right_retention": 0.866007454959619,
+        "balance": 0.925067127748023,
+        "component_face_overlap": 0.8336299624846281,
+        "foreground_ratio": 0.5507964409722222
+      },
+      "refinement_action": "refined",
+      "crop_box": {
+        "x0": 0,
+        "y0": 257,
+        "x1": 720,
+        "y1": 1217,
+        "width": 720,
+        "height": 960,
+        "normalized": [
+          0.0,
+          0.2008,
+          1.0,
+          0.9508
+        ]
+      },
+      "outputs": {
+        "original": "B-healthy-LP-20260910T150406247Z-A74038/birefnet/original.jpg",
+        "alpha": "B-healthy-LP-20260910T150406247Z-A74038/birefnet/alpha.png",
+        "foreground_mask": "B-healthy-LP-20260910T150406247Z-A74038/birefnet/foreground-mask.png",
+        "white_composite": "B-healthy-LP-20260910T150406247Z-A74038/birefnet/white-composite.jpg"
+      },
+      "error": null
+    },
+    {
+      "case": "B-healthy-LP-20260911T032327577Z-C6BF3D",
+      "model": "birefnet",
+      "status": "OK",
+      "input_dimensions": {
+        "width": 1280,
+        "height": 720
+      },
+      "output_dimensions": {
+        "width": 540,
+        "height": 720
+      },
+      "inference_ms": 2737,
+      "alpha_stats": {
+        "min": 0.0,
+        "max": 1.0,
+        "mean": 0.2947,
+        "shape": [
+          720,
+          1280
+        ]
+      },
+      "raw_integrity": {
+        "ok": true,
+        "reason": null,
+        "has_face_box": true,
+        "face_retention": 0.9691503635734072,
+        "head_retention": 0.7076057908284558,
+        "left_retention": 0.9661530470914127,
+        "right_retention": 0.9721476800554016,
+        "balance": 0.9938336190200574,
+        "component_face_overlap": 0.9691503635734072,
+        "foreground_ratio": 0.2955826822916667
+      },
+      "refined_integrity": {
+        "ok": true,
+        "reason": null,
+        "has_face_box": true,
+        "face_retention": 0.970849203601108,
+        "head_retention": 0.709019887528077,
+        "left_retention": 0.9675380886426593,
+        "right_retention": 0.9741603185595568,
+        "balance": 0.9932021148975875,
+        "component_face_overlap": 0.970849203601108,
+        "foreground_ratio": 0.29621636284722225
+      },
+      "refinement_action": "refined",
+      "crop_box": {
+        "x0": 394,
+        "y0": 0,
+        "x1": 934,
+        "y1": 720,
+        "width": 540,
+        "height": 720,
+        "normalized": [
+          0.3078,
+          0.0,
+          0.7297,
+          1.0
+        ]
+      },
+      "outputs": {
+        "original": "B-healthy-LP-20260911T032327577Z-C6BF3D/birefnet/original.jpg",
+        "alpha": "B-healthy-LP-20260911T032327577Z-C6BF3D/birefnet/alpha.png",
+        "foreground_mask": "B-healthy-LP-20260911T032327577Z-C6BF3D/birefnet/foreground-mask.png",
+        "white_composite": "B-healthy-LP-20260911T032327577Z-C6BF3D/birefnet/white-composite.jpg"
+      },
+      "error": null
+    },
+    {
+      "case": "B-healthy-LP-20260911T032414363Z-BA851E",
+      "model": "birefnet",
+      "status": "OK",
+      "input_dimensions": {
+        "width": 1280,
+        "height": 720
+      },
+      "output_dimensions": {
+        "width": 540,
+        "height": 720
+      },
+      "inference_ms": 2542,
+      "alpha_stats": {
+        "min": 0.0,
+        "max": 1.0,
+        "mean": 0.308,
+        "shape": [
+          720,
+          1280
+        ]
+      },
+      "raw_integrity": {
+        "ok": true,
+        "reason": null,
+        "has_face_box": true,
+        "face_retention": 0.9693132154006243,
+        "head_retention": 0.7257749495967742,
+        "left_retention": 0.9842663891779396,
+        "right_retention": 0.954360041623309,
+        "balance": 0.9696155960586966,
+        "component_face_overlap": 0.9693132154006243,
+        "foreground_ratio": 0.3091189236111111
+      },
+      "refined_integrity": {
+        "ok": true,
+        "reason": null,
+        "has_face_box": true,
+        "face_retention": 0.9708324661810614,
+        "head_retention": 0.7268696446572581,
+        "left_retention": 0.9849947970863684,
+        "right_retention": 0.9566701352757544,
+        "balance": 0.971243846267616,
+        "component_face_overlap": 0.9708324661810614,
+        "foreground_ratio": 0.3096657986111111
+      },
+      "refinement_action": "refined",
+      "crop_box": {
+        "x0": 382,
+        "y0": 0,
+        "x1": 922,
+        "y1": 720,
+        "width": 540,
+        "height": 720,
+        "normalized": [
+          0.2984,
+          0.0,
+          0.7203,
+          1.0
+        ]
+      },
+      "outputs": {
+        "original": "B-healthy-LP-20260911T032414363Z-BA851E/birefnet/original.jpg",
+        "alpha": "B-healthy-LP-20260911T032414363Z-BA851E/birefnet/alpha.png",
+        "foreground_mask": "B-healthy-LP-20260911T032414363Z-BA851E/birefnet/foreground-mask.png",
+        "white_composite": "B-healthy-LP-20260911T032414363Z-BA851E/birefnet/white-composite.jpg"
+      },
+      "error": null
+    },
+    {
+      "case": "A-known-failure-LP-20260910T150524236Z-7B4136",
+      "model": "sam2",
+      "status": "OK",
+      "input_dimensions": {
+        "width": 720,
+        "height": 1280
+      },
+      "output_dimensions": {
+        "width": 480,
+        "height": 640
+      },
+      "inference_ms": 1692,
+      "alpha_stats": {
+        "min": 0.0,
+        "max": 1.0,
+        "mean": 0.1454,
+        "shape": [
+          1280,
+          720
+        ]
+      },
+      "raw_integrity": {
+        "ok": true,
+        "reason": null,
+        "has_face_box": true,
+        "face_retention": 0.9769933198504627,
+        "head_retention": 0.5028580213268486,
+        "left_retention": 0.997366218677694,
+        "right_retention": 0.9567860543470299,
+        "balance": 0.9593126741504587,
+        "component_face_overlap": 0.9769933198504627,
+        "foreground_ratio": 0.145361328125
+      },
+      "refined_integrity": {
+        "ok": true,
+        "reason": null,
+        "has_face_box": true,
+        "face_retention": 0.9769933198504627,
+        "head_retention": 0.5028580213268486,
+        "left_retention": 0.997366218677694,
+        "right_retention": 0.9567860543470299,
+        "balance": 0.9593126741504587,
+        "component_face_overlap": 0.9769933198504627,
+        "foreground_ratio": 0.14420030381944443
+      },
+      "refinement_action": "refined",
+      "crop_box": {
+        "x0": 132,
+        "y0": 401,
+        "x1": 612,
+        "y1": 1041,
+        "width": 480,
+        "height": 640,
+        "normalized": [
+          0.1833,
+          0.3133,
+          0.85,
+          0.8133
+        ]
+      },
+      "outputs": {
+        "original": "A-known-failure-LP-20260910T150524236Z-7B4136/sam2/original.jpg",
+        "alpha": "A-known-failure-LP-20260910T150524236Z-7B4136/sam2/alpha.png",
+        "foreground_mask": "A-known-failure-LP-20260910T150524236Z-7B4136/sam2/foreground-mask.png",
+        "white_composite": "A-known-failure-LP-20260910T150524236Z-7B4136/sam2/white-composite.jpg"
+      },
+      "error": null
+    },
+    {
+      "case": "B-healthy-LP-20260910T150406247Z-A74038",
+      "model": "sam2",
+      "status": "OK",
+      "input_dimensions": {
+        "width": 720,
+        "height": 1280
+      },
+      "output_dimensions": {
+        "width": 633,
+        "height": 844
+      },
+      "inference_ms": 1322,
+      "alpha_stats": {
+        "min": 0.0,
+        "max": 1.0,
+        "mean": 0.1081,
+        "shape": [
+          1280,
+          720
+        ]
+      },
+      "raw_integrity": {
+        "ok": false,
+        "reason": "face_retention_low",
+        "has_face_box": true,
+        "face_retention": 0.25980562574913996,
+        "head_retention": 0.19538009949466767,
+        "left_retention": 0.2640808812057291,
+        "right_retention": 0.25554980327189897,
+        "balance": 0.9676952080177887,
+        "component_face_overlap": 0.12838766922130956,
+        "foreground_ratio": 0.10811631944444444
+      },
+      "refined_integrity": {
+        "ok": false,
+        "reason": "face_retention_low",
+        "has_face_box": true,
+        "face_retention": 0.25980562574913996,
+        "head_retention": 0.19538009949466767,
+        "left_retention": 0.2640808812057291,
+        "right_retention": 0.25554980327189897,
+        "balance": 0.9676952080177887,
+        "component_face_overlap": 0.12838766922130956,
+        "foreground_ratio": 0.10811631944444444
+      },
+      "refinement_action": "reverted_to_raw",
+      "crop_box": {
+        "x0": 39,
+        "y0": 259,
+        "x1": 672,
+        "y1": 1103,
+        "width": 633,
+        "height": 844,
+        "normalized": [
+          0.0542,
+          0.2023,
+          0.9333,
+          0.8617
+        ]
+      },
+      "outputs": {
+        "original": "B-healthy-LP-20260910T150406247Z-A74038/sam2/original.jpg",
+        "alpha": "B-healthy-LP-20260910T150406247Z-A74038/sam2/alpha.png",
+        "foreground_mask": "B-healthy-LP-20260910T150406247Z-A74038/sam2/foreground-mask.png",
+        "white_composite": "B-healthy-LP-20260910T150406247Z-A74038/sam2/white-composite.jpg"
+      },
+      "error": null
+    },
+    {
+      "case": "B-healthy-LP-20260911T032327577Z-C6BF3D",
+      "model": "sam2",
+      "status": "OK",
+      "input_dimensions": {
+        "width": 1280,
+        "height": 720
+      },
+      "output_dimensions": {
+        "width": 438,
+        "height": 584
+      },
+      "inference_ms": 1304,
+      "alpha_stats": {
+        "min": 0.0,
+        "max": 1.0,
+        "mean": 0.1228,
+        "shape": [
+          720,
+          1280
+        ]
+      },
+      "raw_integrity": {
+        "ok": false,
+        "reason": "head_retention_low",
+        "has_face_box": true,
+        "face_retention": 0.8589854570637119,
+        "head_retention": 0.44360008525568506,
+        "left_retention": 0.8641793628808865,
+        "right_retention": 0.8537915512465374,
+        "balance": 0.9879795652609435,
+        "component_face_overlap": 0.8587582236842105,
+        "foreground_ratio": 0.12278645833333333
+      },
+      "refined_integrity": {
+        "ok": false,
+        "reason": "head_retention_low",
+        "has_face_box": true,
+        "face_retention": 0.8587582236842105,
+        "head_retention": 0.44132933287426424,
+        "left_retention": 0.8640711565096952,
+        "right_retention": 0.8534452908587258,
+        "balance": 0.9877025571668295,
+        "component_face_overlap": 0.8587582236842105,
+        "foreground_ratio": 0.12217339409722222
+      },
+      "refinement_action": "reverted_to_raw",
+      "crop_box": {
+        "x0": 430,
+        "y0": 105,
+        "x1": 868,
+        "y1": 689,
+        "width": 438,
+        "height": 584,
+        "normalized": [
+          0.3359,
+          0.1458,
+          0.6781,
+          0.9569
+        ]
+      },
+      "outputs": {
+        "original": "B-healthy-LP-20260911T032327577Z-C6BF3D/sam2/original.jpg",
+        "alpha": "B-healthy-LP-20260911T032327577Z-C6BF3D/sam2/alpha.png",
+        "foreground_mask": "B-healthy-LP-20260911T032327577Z-C6BF3D/sam2/foreground-mask.png",
+        "white_composite": "B-healthy-LP-20260911T032327577Z-C6BF3D/sam2/white-composite.jpg"
+      },
+      "error": null
+    },
+    {
+      "case": "B-healthy-LP-20260911T032414363Z-BA851E",
+      "model": "sam2",
+      "status": "OK",
+      "input_dimensions": {
+        "width": 1280,
+        "height": 720
+      },
+      "output_dimensions": {
+        "width": 447,
+        "height": 596
+      },
+      "inference_ms": 1308,
+      "alpha_stats": {
+        "min": 0.0,
+        "max": 1.0,
+        "mean": 0.1254,
+        "shape": [
+          720,
+          1280
+        ]
+      },
+      "raw_integrity": {
+        "ok": false,
+        "reason": "head_retention_low",
+        "has_face_box": true,
+        "face_retention": 0.8567533818938605,
+        "head_retention": 0.4388152091733871,
+        "left_retention": 0.8975234131113423,
+        "right_retention": 0.8159833506763787,
+        "balance": 0.9091499327551825,
+        "component_face_overlap": 0.8567533818938605,
+        "foreground_ratio": 0.12543728298611112
+      },
+      "refined_integrity": {
+        "ok": false,
+        "reason": "head_retention_low",
+        "has_face_box": true,
+        "face_retention": 0.8567533818938605,
+        "head_retention": 0.43829542590725806,
+        "left_retention": 0.8975234131113423,
+        "right_retention": 0.8159833506763787,
+        "balance": 0.9091499327551825,
+        "component_face_overlap": 0.8567533818938605,
+        "foreground_ratio": 0.12528428819444445
+      },
+      "refinement_action": "reverted_to_raw",
+      "crop_box": {
+        "x0": 426,
+        "y0": 111,
+        "x1": 873,
+        "y1": 707,
+        "width": 447,
+        "height": 596,
+        "normalized": [
+          0.3328,
+          0.1542,
+          0.682,
+          0.9819
+        ]
+      },
+      "outputs": {
+        "original": "B-healthy-LP-20260911T032414363Z-BA851E/sam2/original.jpg",
+        "alpha": "B-healthy-LP-20260911T032414363Z-BA851E/sam2/alpha.png",
+        "foreground_mask": "B-healthy-LP-20260911T032414363Z-BA851E/sam2/foreground-mask.png",
+        "white_composite": "B-healthy-LP-20260911T032414363Z-BA851E/sam2/white-composite.jpg"
+      },
+      "error": null
+    }
+  ]
+}
