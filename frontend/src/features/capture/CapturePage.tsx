@@ -35,7 +35,8 @@ import {
 import type { CaptureBundle } from './types/capture'
 import type { FaceDetectorProvider } from './quality/face/FaceDetectorProvider'
 import type { BundleQualityAssessment } from './quality/types/quality'
-import { livenessRetryMessage } from './copy'
+import { livenessRetryMessage, portraitPreparationErrorMessage } from './copy'
+import { selectedFaceBoxParam } from './quality/faceBox'
 import { Button, StatusMessage } from '../../design-system'
 import { readRuntimeConfig } from '../../lib/runtimeConfig'
 import { captureConfig } from './config/captureConfig'
@@ -126,10 +127,17 @@ export function CapturePage({
       return
     }
     try {
+      // Primary normalized face box (geometry guidance only) persisted with the capture so portrait
+      // processing uses the CURRENT capture's box; also passed to the portrait request as fallback.
+      const faceBox = selectedFaceBoxParam(
+        current.qualityAssessment,
+        current.bundle?.representativeFrameId,
+      )
       const created = await createTransaction(
         selected,
         captureConfig.configVersion,
         qualityConfig.configVersion,
+        faceBox,
       )
       // Server-authoritative liveness: the backend evaluates the stored capture with the configured
       // provider (VLM_PROVIDER) and persists a normalized result. The browser never decides LIVE.
@@ -153,10 +161,10 @@ export function CapturePage({
         return
       }
       // Backend-confirmed LIVE -> the LIVE-gated experiment portrait endpoint may proceed.
-      await processPortrait(created.transactionId)
+      await processPortrait(created.transactionId, faceBox)
       setStandalonePortraitUrl(transactionArtifactUrl(created.transactionId, 'PROCESSED_PORTRAIT'))
-    } catch {
-      setStandaloneError('Your photo could not be prepared. Please try again.')
+    } catch (caught) {
+      setStandaloneError(portraitPreparationErrorMessage(caught))
     }
   }, [])
 

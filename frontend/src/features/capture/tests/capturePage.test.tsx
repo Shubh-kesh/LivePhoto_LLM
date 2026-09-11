@@ -313,6 +313,13 @@ describe('CapturePage M5.5 journey', () => {
     expect(createTransaction).toHaveBeenCalledTimes(1)
     expect(evaluateTransactionLiveness).toHaveBeenCalledTimes(1)
     expect(processPortrait).toHaveBeenCalledTimes(1)
+    // The primary normalized face box is persisted with the capture (geometry guidance only).
+    expect(createTransaction).toHaveBeenCalledWith(
+      expect.any(Blob),
+      expect.any(String),
+      expect.any(String),
+      '0.250000,0.200000,0.500000,0.500000',
+    )
 
     // Use photo completes the normal standalone flow -> Success screen.
     fireEvent.click(screen.getByRole('button', { name: 'Use photo' }))

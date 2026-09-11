@@ -155,9 +155,19 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def _handle_portrait_error(request: Request, exc: PortraitProcessingError) -> Any:
         from fastapi.responses import JSONResponse
 
+        from app.portrait.errors import portrait_error_status
+
+        status_code = portrait_error_status(exc.code)
+        # PORTRAIT_QUALITY_FAILED is an expected retryable image-quality outcome (backend worked;
+        # matte structurally unusable) -> 422 + a customer-safe retry message, never a generic 500.
+        message = (
+            "We couldn't prepare this photo clearly. Please try again."
+            if status_code == 422
+            else "We couldn't prepare your photo."
+        )
         return JSONResponse(
-            status_code=500,
-            content=_envelope(request, exc.code.value, "We couldn't prepare your photo.", 500),
+            status_code=status_code,
+            content=_envelope(request, exc.code.value, message, status_code),
         )
 
     @app.exception_handler(S2SAuthError)

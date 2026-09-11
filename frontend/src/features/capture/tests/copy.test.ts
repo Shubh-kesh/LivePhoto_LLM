@@ -5,7 +5,13 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { errorCopyFor, livenessRetryMessage, retryCopyForReasonCodes } from '../copy'
+import {
+  errorCopyFor,
+  livenessRetryMessage,
+  portraitPreparationErrorMessage,
+  retryCopyForReasonCodes,
+} from '../copy'
+import { ApiClientError } from '../../../api/client'
 import { CameraError } from '../media/mediaErrors'
 import { QualityError } from '../quality/errors'
 
@@ -48,6 +54,31 @@ describe('livenessRetryMessage (backend single-person gate)', () => {
     const message = livenessRetryMessage(undefined)
     expect(message).toBe("We couldn't use this photo. Please try again.")
     expect(message).not.toMatch(/vlm|groq|confidence|provider|model/i)
+  })
+})
+
+describe('portraitPreparationErrorMessage (portrait-quality gate)', () => {
+  it('gives the specific message for PORTRAIT_QUALITY_FAILED', () => {
+    const error = new ApiClientError('PORTRAIT_QUALITY_FAILED', 'x', 500, null)
+    expect(portraitPreparationErrorMessage(error)).toBe(
+      "We couldn't prepare this photo clearly. Please try again.",
+    )
+  })
+
+  it('falls back to the generic preparation message otherwise', () => {
+    expect(portraitPreparationErrorMessage(new Error('network'))).toBe(
+      'Your photo could not be prepared. Please try again.',
+    )
+    expect(
+      portraitPreparationErrorMessage(new ApiClientError('CALLBACK_FAILED', 'x', 502, null)),
+    ).toBe('Your photo could not be prepared. Please try again.')
+  })
+
+  it('never exposes model/threshold internals', () => {
+    const message = portraitPreparationErrorMessage(
+      new ApiClientError('PORTRAIT_QUALITY_FAILED', 'x', 500, null),
+    )
+    expect(message).not.toMatch(/modnet|alpha|threshold|matte|model/i)
   })
 })
 

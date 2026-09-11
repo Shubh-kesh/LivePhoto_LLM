@@ -32,8 +32,8 @@ vi.mock('../api', () => ({
     mockWriteTestDecision()
     return Promise.resolve({})
   },
-  triggerPortrait: () => {
-    mockTriggerPortrait()
+  triggerPortrait: (...args: unknown[]) => {
+    mockTriggerPortrait(...args)
     return Promise.resolve({})
   },
   submitForConsumer: () => {
@@ -81,6 +81,14 @@ vi.mock('../../capture/CapturePage', () => ({
                 { id: 'rep', blob: new Blob(['rep']) },
               ],
               representativeFrameId: 'rep',
+            },
+            qualityAssessment: {
+              frames: [
+                {
+                  frameId: 'rep',
+                  face: { normalizedBoundingBox: { x: 0.3, y: 0.2, width: 0.4, height: 0.5 } },
+                },
+              ],
             },
           })
         }
@@ -187,6 +195,22 @@ describe('IntegrationPage', () => {
     expect(mockBrowserLiveness).toHaveBeenCalledTimes(1)
     expect(mockTriggerPortrait).toHaveBeenCalledTimes(1)
     expect(mockWriteTestDecision).not.toHaveBeenCalled()
+  })
+
+  it('passes the selected primary normalized face box to portrait processing', async () => {
+    mockSession('active')
+    render(<IntegrationPage />)
+    await waitFor(() => expect(screen.getByTestId('mock-capture')).toBeInTheDocument())
+    screen.getByText('attempt-eligible').click()
+    screen.getByText('auto-process').click()
+    await waitFor(() => expect(mockTriggerPortrait).toHaveBeenCalledTimes(1))
+    // The box is sent at upload (persisted, bound to the current capture) and to the portrait call.
+    expect(mockUploadCapture).toHaveBeenCalledWith(
+      'att-1',
+      expect.any(Blob),
+      '0.300000,0.200000,0.400000,0.500000',
+    )
+    expect(mockTriggerPortrait).toHaveBeenCalledWith('0.300000,0.200000,0.400000,0.500000')
   })
 
   it('non-LIVE liveness result blocks portrait and offers a safe Retry', async () => {

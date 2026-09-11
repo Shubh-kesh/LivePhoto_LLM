@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.core.config import Settings
 from app.integrations.consumers import ConsumerProfile
 from app.integrations.store import IntegrationIndexStore, external_key_hash, sha256_hex
+from app.transactions.ids import create_transaction_with_generated_id
 from app.transactions.store import (
     TransactionExistsError,
     TransactionFileStore,
@@ -85,6 +86,8 @@ def _transaction_metadata(
     profile: ConsumerProfile,
     req: LaunchSessionRequest,
     status: str,
+    *,
+    created_at: datetime.datetime | None = None,
 ) -> dict[str, object]:
     return {
         "transaction_id": internal_tx_id,
@@ -96,7 +99,7 @@ def _transaction_metadata(
         "white_background": req.white_background,
         "output_file_format": req.output_file_format,
         "status": status,
-        "created_at": _utc_now().isoformat(),
+        "created_at": (created_at or _utc_now()).isoformat(),
         "app_version": settings.app_version,
     }
 
@@ -119,20 +122,27 @@ def create_launch(
         if index_store.get_external(key_hash) is not None:
             raise TransactionExistsError("transaction already exists for this consumer")
 
-        internal_tx_id = uuid.uuid4().hex
-        tx_store.create_transaction(
-            internal_tx_id,
-            _transaction_metadata(
-                settings, internal_tx_id, profile, req, TransactionStatus.LAUNCHED.value
-            ),
-        )
+        created_at = _utc_now()
+
+        def _metadata(internal_tx_id: str) -> dict[str, object]:
+            return _transaction_metadata(
+                settings,
+                internal_tx_id,
+                profile,
+                req,
+                TransactionStatus.LAUNCHED.value,
+                created_at=created_at,
+            )
+
+        # LivePhoto-internal ID (LP-<UTC timestamp>-<random>); external ID is preserved verbatim.
+        internal_tx_id = create_transaction_with_generated_id(tx_store, _metadata, now=created_at)
         index_store.put_external(
             key_hash,
             {
                 "internal_transaction_id": internal_tx_id,
                 "external_transaction_id": req.transaction_id,
                 "consumer_id": profile.consumer_id,
-                "created_at": _utc_now().isoformat(),
+                "created_at": created_at.isoformat(),
             },
         )
 

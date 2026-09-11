@@ -14,7 +14,7 @@ filesystem.
 
 from __future__ import annotations
 
-import uuid
+import datetime
 from typing import Any, cast
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
@@ -23,7 +23,12 @@ from fastapi.responses import Response
 from app.core.config import Settings
 from app.core.errors import ApiError
 from app.experiments.vlm import liveness
-from app.portrait import PortraitErrorCode, PortraitProcessingError, PortraitProcessor
+from app.portrait import (
+    PortraitErrorCode,
+    PortraitProcessingError,
+    PortraitProcessor,
+    parse_normalized_face_box,
+)
 from app.providers.vision import VlmError
 from app.transactions import (
     ARTIFACT_RELATIVE_PATHS,
@@ -33,6 +38,7 @@ from app.transactions import (
     TransactionFileStore,
     TransactionPathError,
     TransactionStorageError,
+    create_transaction_with_generated_id,
     is_valid_transaction_id,
 )
 
@@ -82,6 +88,7 @@ async def create_transaction(
     image: UploadFile = File(...),  # noqa: B008
     capture_config_version: str = Form(""),
     quality_config_version: str = Form(""),
+    face_box: str = Form(""),
 ) -> dict[str, Any]:
     """Create a transaction folder FIRST, then persist the selected original capture (M5.7 §2)."""
     settings = _settings(request)
@@ -91,19 +98,22 @@ async def create_transaction(
 
     data = await _read_bounded(image, settings.vlm_max_single_image_bytes)
     mime = _validate_image(data, image.content_type or "image/jpeg")
+    capture_face_box = parse_normalized_face_box(face_box)
 
-    transaction_id = uuid.uuid4().hex
-    store.create_transaction(
-        transaction_id,
-        {
-            "transaction_id": transaction_id,
-            "created_at": _utc_now(),
+    created_at = datetime.datetime.now(datetime.UTC)
+
+    def _metadata(tid: str) -> dict[str, Any]:
+        return {
+            "transaction_id": tid,
+            "created_at": created_at.isoformat(),
             "app_version": settings.app_version,
             "capture_config_version": capture_config_version,
             "quality_config_version": quality_config_version,
             "status": "CREATED",
-        },
-    )
+        }
+
+    # LivePhoto-internal ID (LP-<UTC timestamp>-<random>), created atomically with collision retry.
+    transaction_id = create_transaction_with_generated_id(store, _metadata, now=created_at)
     capture_ref = store.write_artifact(
         transaction_id,
         ArtifactType.SELECTED_ORIGINAL_CAPTURE,
@@ -121,6 +131,7 @@ async def create_transaction(
             "sha256": capture_ref.sha256,
             "capture_config_version": capture_config_version,
             "quality_config_version": quality_config_version,
+            "face_box": list(capture_face_box) if capture_face_box else None,
         },
     )
     store.update_transaction_status(transaction_id, "CAPTURE_READY")
@@ -325,14 +336,16 @@ async def _run_portrait_processing(
             "portrait processing is disabled",
         )
 
-    face_box_normalized: tuple[float, float, float, float] | None = None
-    if face_box.strip():
-        parts = face_box.split(",")
-        if len(parts) == 4:
-            try:
-                face_box_normalized = tuple(float(p) for p in parts)  # type: ignore[assignment]
-            except ValueError:
-                face_box_normalized = None
+    face_box_normalized = liveness.current_capture_face_box(
+        store, transaction_id
+    ) or parse_normalized_face_box(face_box)
+    if face_box_normalized is None:
+        # No valid primary face box for the CURRENT capture -> retryable quality failure (the strong
+        # matte-integrity gate requires geometry; never silently fall back to weak validation).
+        raise PortraitProcessingError(
+            PortraitErrorCode.PORTRAIT_QUALITY_FAILED,
+            "a valid primary face box is required for portrait processing",
+        )
 
     source_ref = ArtifactReference(
         transaction_id=transaction_id,
@@ -368,9 +381,3 @@ async def _run_portrait_processing(
         "height": result.height,
         "processing_ms": result.processing_ms,
     }
-
-
-def _utc_now() -> str:
-    import datetime
-
-    return datetime.datetime.now(datetime.UTC).isoformat()

@@ -1,4 +1,4 @@
-"""Region-aware matte refinement (M5.7 correction).
+"""Region-aware matte refinement (M5.7 correction; pre-M6 integrity guard).
 
 MODNet produces a soft alpha matte that is desirable around hair and fine contours but undesirable
 in the interior of solid clothing/torso where similar-luminance backgrounds can cause soft "tear"
@@ -12,6 +12,13 @@ artifacts. This deterministic post-processing distinguishes:
 
 It is numpy-only (no OpenCV/SciPy). The primary-person component is anchored to the M3 primary face
 box so foreground is never chosen by largest-component alone.
+
+PRE-M6 GUARD: connected-component cleanup can delete legitimate parts of a fragmented primary
+subject. Before any destructive removal, the selected primary component must credibly cover the
+known primary face region; otherwise this function preserves the raw matte untouched (removing
+uncertain parts of the primary subject is worse than leaving background). Raw-matte integrity is
+still enforced separately by ``app.portrait.integrity`` — this guard never authorizes a broken
+matte.
 """
 
 from __future__ import annotations
@@ -20,7 +27,9 @@ from collections import deque
 
 import numpy as np
 
-MATTE_REFINEMENT_VERSION = "matte-refinement-v2"
+from app.portrait.integrity import MIN_COMPONENT_FACE_OVERLAP, face_roi_px
+
+MATTE_REFINEMENT_VERSION = "matte-refinement-v3"
 
 #: Confidence zones (provisional in-code thresholds).
 SUPPORT_THRESHOLD = 0.35  # primary-person component seed mask (includes mid-alpha torso)
@@ -29,7 +38,7 @@ BODY_REINFORCE_THRESHOLD = 0.35  # mid alpha inside the body is raised to solid
 BODY_REINFORCE_ALPHA = 0.95
 
 
-def _connected_component(mask: np.ndarray, seed: tuple[int, int]) -> np.ndarray:
+def connected_component_mask(mask: np.ndarray, seed: tuple[int, int]) -> np.ndarray:
     """4-connected component of ``mask`` containing ``seed`` (deterministic, numpy-only)."""
     component = np.zeros_like(mask, dtype=bool)
     height, width = mask.shape
@@ -64,11 +73,32 @@ def _seed_point(
     return (int((ys[0] + ys[-1]) // 2), int((xs[0] + xs[-1]) // 2))
 
 
+def _component_covers_face(
+    support: np.ndarray, face_box_normalized: tuple[float, float, float, float]
+) -> bool:
+    """True when the primary component credibly covers the primary face ROI.
+
+    When false, destructive disconnected-component removal is skipped so valid parts of a
+    fragmented primary subject are never erased.
+    """
+    height, width = support.shape
+    x0, y0, x1, y1 = face_roi_px(face_box_normalized, width, height)
+    if x1 <= x0 or y1 <= y0:
+        return True  # cannot assess the ROI -> do not block on unknown geometry
+    region = support[y0:y1, x0:x1]
+    coverage = float(np.count_nonzero(region)) / float(region.size)
+    return coverage >= MIN_COMPONENT_FACE_OVERLAP
+
+
 def refine_matte(
     alpha: np.ndarray,
     face_box_normalized: tuple[float, float, float, float] | None = None,
 ) -> np.ndarray:
-    """Region-aware refinement: body reinforced, hair soft, disconnected regions removed."""
+    """Region-aware refinement: body reinforced, hair soft, disconnected regions removed.
+
+    Destructive cleanup is skipped (raw matte preserved) when a face box is supplied but the
+    selected primary component does not credibly cover the primary face region.
+    """
     alpha = np.asarray(alpha, dtype=np.float32)
     mask = alpha > SUPPORT_THRESHOLD
     seed = _seed_point(mask, face_box_normalized)
@@ -76,7 +106,12 @@ def refine_matte(
         # Cannot anchor the primary person reliably: leave the matte untouched (never blank it).
         return alpha
 
-    support = _connected_component(mask, seed)
+    support = connected_component_mask(mask, seed)
+
+    if face_box_normalized is not None and not _component_covers_face(support, face_box_normalized):
+        # Untrustworthy primary component: preserve the raw matte rather than deleting uncertain
+        # parts of the primary subject. (Raw integrity is enforced upstream.)
+        return alpha
 
     # Remove confident foreground that is NOT part of the primary person (disconnected background
     # people, furniture, screens). Low/mid alpha (soft hair, uncertain edges) is left intact.

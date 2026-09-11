@@ -5,6 +5,11 @@ from app.transactions.artifacts import (
     ArtifactReference,
     ArtifactType,
 )
+from app.transactions.ids import (
+    INTERNAL_TRANSACTION_ID_PATTERN,
+    create_transaction_with_generated_id,
+    generate_internal_transaction_id,
+)
 from app.transactions.store import (
     TERMINAL_TRANSACTION_STATUSES,
     ArtifactNotFoundError,
@@ -21,6 +26,7 @@ from app.transactions.store import (
 
 __all__ = [
     "ARTIFACT_RELATIVE_PATHS",
+    "INTERNAL_TRANSACTION_ID_PATTERN",
     "TERMINAL_TRANSACTION_STATUSES",
     "ArtifactNotFoundError",
     "ArtifactReference",
@@ -32,6 +38,8 @@ __all__ = [
     "TransactionPathError",
     "TransactionStatus",
     "TransactionStorageError",
+    "create_transaction_with_generated_id",
+    "generate_internal_transaction_id",
     "is_valid_transaction_id",
     "sha256_hex",
 ]

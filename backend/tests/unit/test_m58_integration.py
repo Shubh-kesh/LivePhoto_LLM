@@ -27,7 +27,11 @@ from app.experiments.vlm import liveness
 from app.factory import create_app
 from app.integrations.callback import build_callback_event_id
 from app.integrations.store import external_key_hash
+from app.transactions.ids import INTERNAL_TRANSACTION_ID_PATTERN
 from app.transactions.store import TransactionFileStore
+
+#: Valid primary normalized face box used across capture/portrait tests (geometry guidance only).
+_FACE_BOX = "0.35,0.28,0.30,0.26"
 
 D365 = {
     "consumer_id": "D365",
@@ -621,7 +625,7 @@ def test_capture_upload_counts_and_attempt_id_dedup(tmp_path) -> None:
         # same attempt_id on capture -> no double count
         res = client.post(
             "/api/v1/browser/capture",
-            data={"attempt_id": "c1"},
+            data={"attempt_id": "c1", "face_box": _FACE_BOX},
             files={"selected_image": ("sel.jpg", _jpeg_bytes(), "image/jpeg")},
             headers=_browser_headers(cookies["lp_session"], cookies["lp_csrf"]),
         )
@@ -671,7 +675,7 @@ def _redeem_and_capture(client: TestClient) -> dict[str, str]:
     cookies = _active_cookies(client)
     res = client.post(
         "/api/v1/browser/capture",
-        data={"attempt_id": "cap1"},
+        data={"attempt_id": "cap1", "face_box": _FACE_BOX},
         files={"selected_image": ("sel.jpg", _jpeg_bytes(), "image/jpeg")},
         headers=_browser_headers(cookies["lp_session"], cookies["lp_csrf"]),
     )
@@ -1382,7 +1386,7 @@ def test_quality_eligible_then_capture_dedups(tmp_path) -> None:
         # Same attempt_id on /browser/capture must not increment again.
         res = client.post(
             "/api/v1/browser/capture",
-            data={"attempt_id": "qe-2"},
+            data={"attempt_id": "qe-2", "face_box": _FACE_BOX},
             files={"selected_image": ("sel.jpg", _jpeg_bytes(), "image/jpeg")},
             headers=bh,
         )
@@ -1429,7 +1433,7 @@ def test_capture_same_attempt_id_second_upload_rejected(tmp_path) -> None:
         bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
         first = client.post(
             "/api/v1/browser/capture",
-            data={"attempt_id": "up-1"},
+            data={"attempt_id": "up-1", "face_box": _FACE_BOX},
             files={"selected_image": ("sel.jpg", _jpeg_bytes(), "image/jpeg")},
             headers=bh,
         )
@@ -1438,7 +1442,7 @@ def test_capture_same_attempt_id_second_upload_rejected(tmp_path) -> None:
         # client cannot overwrite selected-original repeatedly without consuming attempts.
         second = client.post(
             "/api/v1/browser/capture",
-            data={"attempt_id": "up-1"},
+            data={"attempt_id": "up-1", "face_box": _FACE_BOX},
             files={"selected_image": ("sel.jpg", _jpeg_bytes(64, 64), "image/jpeg")},
             headers=bh,
         )
@@ -1462,7 +1466,7 @@ def test_concurrent_capture_same_attempt_id_single_upload(tmp_path) -> None:
             with TestClient(app) as c:
                 return c.post(
                     "/api/v1/browser/capture",
-                    data={"attempt_id": "conc-up"},
+                    data={"attempt_id": "conc-up", "face_box": _FACE_BOX},
                     files={"selected_image": ("sel.jpg", _jpeg_bytes(), "image/jpeg")},
                     headers=_browser_headers(session_cookie, csrf),
                 ).status_code
@@ -1491,12 +1495,16 @@ def _liveness_app(tmp_path, **overrides: object):
 
 
 def _capture_and_liveness(
-    client: TestClient, cookies: dict[str, str], attempt_id: str, jpeg: bytes | None = None
+    client: TestClient,
+    cookies: dict[str, str],
+    attempt_id: str,
+    jpeg: bytes | None = None,
+    face_box: str = _FACE_BOX,
 ):
     bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
     cap = client.post(
         "/api/v1/browser/capture",
-        data={"attempt_id": attempt_id},
+        data={"attempt_id": attempt_id, "face_box": face_box},
         files={"selected_image": ("sel.jpg", jpeg or _jpeg_bytes(), "image/jpeg")},
         headers=bh,
     )
@@ -1530,7 +1538,7 @@ def test_browser_liveness_uses_configured_provider_not_browser(tmp_path) -> None
         bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
         client.post(
             "/api/v1/browser/capture",
-            data={"attempt_id": "a1"},
+            data={"attempt_id": "a1", "face_box": _FACE_BOX},
             files={"selected_image": ("sel.jpg", _jpeg_bytes(), "image/jpeg")},
             headers=bh,
         )
@@ -1647,7 +1655,7 @@ def test_browser_liveness_idempotent_single_provider_call(tmp_path, monkeypatch)
         bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
         client.post(
             "/api/v1/browser/capture",
-            data={"attempt_id": "idem-1"},
+            data={"attempt_id": "idem-1", "face_box": _FACE_BOX},
             files={"selected_image": ("sel.jpg", _jpeg_bytes(), "image/jpeg")},
             headers=bh,
         )
@@ -1751,7 +1759,7 @@ def test_customer_xbiz_path_works_without_test_writer(tmp_path) -> None:
             bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
             client.post(
                 "/api/v1/browser/capture",
-                data={"attempt_id": "ok-1"},
+                data={"attempt_id": "ok-1", "face_box": _FACE_BOX},
                 files={"selected_image": ("sel.jpg", _jpeg_bytes(), "image/jpeg")},
                 headers=bh,
             )
@@ -1796,7 +1804,7 @@ def _bound_pass_decision(app, internal_tx_id: str, attempt_id: str, image_sha: s
 def _capture(client: TestClient, cookies: dict[str, str], attempt_id: str, jpeg: bytes) -> None:
     res = client.post(
         "/api/v1/browser/capture",
-        data={"attempt_id": attempt_id},
+        data={"attempt_id": attempt_id, "face_box": _FACE_BOX},
         files={"selected_image": ("sel.jpg", jpeg, "image/jpeg")},
         headers=_browser_headers(cookies["lp_session"], cookies["lp_csrf"]),
     )
@@ -2677,7 +2685,7 @@ def test_subject_count_new_capture_invalidates_previous_one_live_pass(tmp_path) 
         bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
         client.post(
             "/api/v1/browser/capture",
-            data={"attempt_id": "cap-2"},
+            data={"attempt_id": "cap-2", "face_box": _FACE_BOX},
             files={"selected_image": ("sel.jpg", _jpeg_bytes(64, 64), "image/jpeg")},
             headers=bh,
         )
@@ -2710,6 +2718,7 @@ def test_subject_count_multiple_blocks_standalone_portrait(tmp_path) -> None:
             data={
                 "capture_config_version": "capture-v1",
                 "quality_config_version": "quality-v1",
+                "face_box": _FACE_BOX,
             },
         ).json()["transaction_id"]
         liv = client.post(f"/api/v1/transactions/{tx_id}/liveness")
@@ -2883,7 +2892,7 @@ def test_legacy_v1_pass_cache_not_reused_reevaluates_once(tmp_path, monkeypatch)
         bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
         cap = client.post(
             "/api/v1/browser/capture",
-            data={"attempt_id": "legacy-1"},
+            data={"attempt_id": "legacy-1", "face_box": _FACE_BOX},
             files={"selected_image": ("sel.jpg", _jpeg_bytes(), "image/jpeg")},
             headers=bh,
         )
@@ -2920,7 +2929,7 @@ def test_legacy_v1_cache_reevaluated_live_one_may_pass(tmp_path, monkeypatch) ->
         bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
         client.post(
             "/api/v1/browser/capture",
-            data={"attempt_id": "legacy-2"},
+            data={"attempt_id": "legacy-2", "face_box": _FACE_BOX},
             files={"selected_image": ("sel.jpg", _jpeg_bytes(), "image/jpeg")},
             headers=bh,
         )
@@ -2956,7 +2965,7 @@ def test_legacy_v1_cache_reevaluated_live_multiple_retry_no_pass(tmp_path, monke
         bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
         client.post(
             "/api/v1/browser/capture",
-            data={"attempt_id": "legacy-3"},
+            data={"attempt_id": "legacy-3", "face_box": _FACE_BOX},
             files={"selected_image": ("sel.jpg", _jpeg_bytes(), "image/jpeg")},
             headers=bh,
         )
@@ -3022,7 +3031,7 @@ def test_current_v2_cache_reused_idempotently(tmp_path, monkeypatch) -> None:
         bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
         client.post(
             "/api/v1/browser/capture",
-            data={"attempt_id": "v2-1"},
+            data={"attempt_id": "v2-1", "face_box": _FACE_BOX},
             files={"selected_image": ("sel.jpg", _jpeg_bytes(), "image/jpeg")},
             headers=bh,
         )
@@ -3042,7 +3051,7 @@ def test_malformed_cached_subject_count_reevaluated_no_default_one(tmp_path, mon
         bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
         client.post(
             "/api/v1/browser/capture",
-            data={"attempt_id": "bad-1"},
+            data={"attempt_id": "bad-1", "face_box": _FACE_BOX},
             files={"selected_image": ("sel.jpg", _jpeg_bytes(), "image/jpeg")},
             headers=bh,
         )
@@ -3084,6 +3093,7 @@ def test_standalone_legacy_v1_cache_reevaluated(tmp_path, monkeypatch) -> None:
             data={
                 "capture_config_version": "capture-v1",
                 "quality_config_version": "quality-v1",
+                "face_box": _FACE_BOX,
             },
         ).json()["transaction_id"]
         store: TransactionFileStore = app.state.transaction_store
@@ -3216,7 +3226,7 @@ def test_secondary_current_background_cache_reused_idempotently(tmp_path, monkey
         bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
         client.post(
             "/api/v1/browser/capture",
-            data={"attempt_id": "bg-1"},
+            data={"attempt_id": "bg-1", "face_box": _FACE_BOX},
             files={"selected_image": ("sel.jpg", _jpeg_bytes(), "image/jpeg")},
             headers=bh,
         )
@@ -3243,7 +3253,7 @@ def test_secondary_legacy_cache_missing_state_not_reused_as_pass(tmp_path, monke
         bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
         client.post(
             "/api/v1/browser/capture",
-            data={"attempt_id": "v2-1"},
+            data={"attempt_id": "v2-1", "face_box": _FACE_BOX},
             files={"selected_image": ("sel.jpg", _jpeg_bytes(), "image/jpeg")},
             headers=bh,
         )
@@ -3286,6 +3296,7 @@ def test_secondary_standalone_portrait_background_allowed_interfering_blocked(tm
                 data={
                     "capture_config_version": "capture-v1",
                     "quality_config_version": "quality-v1",
+                    "face_box": _FACE_BOX,
                 },
             ).json()["transaction_id"]
             liv = client.post(f"/api/v1/transactions/{tx_id}/liveness")
@@ -3385,6 +3396,7 @@ def test_secondary_zero_none_never_pass_browser_and_standalone(tmp_path) -> None
             data={
                 "capture_config_version": "capture-v1",
                 "quality_config_version": "quality-v1",
+                "face_box": _FACE_BOX,
             },
         ).json()["transaction_id"]
         _persist_vlm_result(client.app.state.transaction_store, tx_id, "LIVE", "ZERO", "NONE")
@@ -3460,6 +3472,7 @@ def test_secondary_standalone_portrait_uses_same_eligibility_rule(tmp_path) -> N
                 data={
                     "capture_config_version": "capture-v1",
                     "quality_config_version": "quality-v1",
+                    "face_box": _FACE_BOX,
                 },
             ).json()["transaction_id"]
             _persist_vlm_result(client.app.state.transaction_store, tx_id, cls, sc, sps)
@@ -3475,7 +3488,7 @@ def test_secondary_inconsistent_v3_cache_not_reused(tmp_path, monkeypatch) -> No
         bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
         client.post(
             "/api/v1/browser/capture",
-            data={"attempt_id": "inc-1"},
+            data={"attempt_id": "inc-1", "face_box": _FACE_BOX},
             files={"selected_image": ("sel.jpg", _jpeg_bytes(), "image/jpeg")},
             headers=bh,
         )
@@ -3504,3 +3517,183 @@ def test_secondary_inconsistent_v3_cache_not_reused(tmp_path, monkeypatch) -> No
         assert refreshed["subject_count"] == "ONE"
         assert refreshed["secondary_person_state"] == "NONE"
         assert res.json()["outcome"] == "PASS"
+
+
+# -------------------------------- internal vs external transaction IDs (pre-M6)
+def test_launch_preserves_external_id_and_uses_new_internal_id(tmp_path) -> None:
+    app = _make_app(tmp_path)
+    with TestClient(app) as client:
+        body = _launch(client)
+        # External consumer-supplied ID is preserved verbatim in the API response.
+        assert body["transaction_id"] == "ext-123"
+        store: TransactionFileStore = app.state.transaction_store
+        internal = _internal_tx_id(client, None)
+        # Internal LivePhoto ID uses the new LP-<UTC timestamp>-<random> format.
+        assert INTERNAL_TRANSACTION_ID_PATTERN.fullmatch(internal)
+        assert store.transaction_exists(internal)
+        metadata = store.read_transaction_json(internal)
+        assert metadata["transaction_id"] == internal
+        assert metadata["external_transaction_id"] == "ext-123"
+        # The external ID is still exposed unchanged (idempotent reissue uses the same internal id).
+        assert external_key_hash("D365", "ext-123") is not None
+
+
+def test_full_submit_flow_internal_id_is_new_format(tmp_path) -> None:
+    received: dict[str, Any] = {}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            length = int(self.headers.get("Content-Length", 0))
+            received["body"] = self.rfile.read(length)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"redirect_url": "http://localhost:3001/complete"}')
+
+        def log_message(self, *args: Any) -> None:
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        profile = dict(
+            D365,
+            **{
+                "callback": {
+                    "url": f"http://127.0.0.1:{port}/cb",
+                    "auth_type": "none",
+                    "secret_env": "",
+                }
+            },
+        )
+        app = _make_app(
+            tmp_path, consumers=[profile], vlm_provider="mock", vlm_mock_behavior="live"
+        )
+        with TestClient(app) as client:
+            cookies = _redeem_and_capture(client)
+            internal = _internal_tx_id(client, None)
+            assert INTERNAL_TRANSACTION_ID_PATTERN.fullmatch(internal)
+            bh = _live_portrait(client, cookies)
+            res = client.post("/api/v1/browser/submit", headers=bh)
+            assert res.status_code == 200, res.text
+            assert res.json()["redirect_url"] == "http://localhost:3001/complete"
+            assert received["body"]  # callback delivered unchanged
+    finally:
+        server.shutdown()
+
+
+# --------------------------------- portrait structural-quality failure (pre-M6)
+class _CorruptedFaceSegmentation:
+    """Raw matte with the primary face/head left side missing (confirmed failure geometry)."""
+
+    @property
+    def info(self) -> dict[str, str]:
+        return {"name": "corrupted-face-test", "backend": "test", "sha256": "fake"}
+
+    def predict_alpha(self, image):
+        import numpy as np
+        from PIL import Image  # noqa: F401
+
+        width, height = image.size
+        alpha = np.zeros((height, width), dtype=np.float32)
+        yy, xx = np.mgrid[0:height, 0:width]
+        cx = 0.5 * width
+        right = xx >= cx - 0.03 * width
+        head = (
+            ((xx - cx) / (0.20 * width)) ** 2 + ((yy - 0.30 * height) / (0.16 * height)) ** 2 <= 1
+        ) & right
+        alpha[head] = 0.95
+        return alpha
+
+
+def test_browser_portrait_quality_failure_is_retryable(tmp_path) -> None:
+    app = _liveness_app(tmp_path)
+    with TestClient(app) as client:
+        # Override AFTER startup (lifespan sets the fake segmentation for provider == "fake").
+        app.state.portrait_segmentation = _CorruptedFaceSegmentation()
+        cookies = _active_cookies(client)
+        _capture_and_liveness(client, cookies, "a1")  # LIVE -> canonical PASS
+        bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+        res = client.post(
+            "/api/v1/browser/portrait",
+            data={"face_box": "0.35,0.19,0.30,0.22"},
+            headers=bh,
+        )
+        assert res.status_code == 422, res.text
+        assert res.json()["error"]["code"] == "PORTRAIT_QUALITY_FAILED"
+        store: TransactionFileStore = app.state.transaction_store
+        internal = _internal_tx_id(client, None)
+        # No corrupted portrait is promoted; the transaction is NOT a technical error (retryable).
+        assert not store.artifact_exists(internal, "portrait/processed.jpg")
+        assert store.read_transaction_json(internal)["status"] != "TECHNICAL_ERROR"
+        assert store.read_transaction_json(internal)["status"] not in {
+            "COMPLETED",
+            "ATTEMPT_LIMIT_EXCEEDED",
+            "FAILED",
+        }
+
+
+# ------------------------- face box required + bound to current capture (pre-M6)
+def test_browser_portrait_missing_face_box_is_retryable(tmp_path) -> None:
+    app = _liveness_app(tmp_path)
+    with TestClient(app) as client:
+        cookies = _active_cookies(client)
+        # Capture deliberately without a face box.
+        res = _capture_and_liveness(client, cookies, "a1", face_box="")
+        assert res.status_code == 200 and res.json()["outcome"] == "PASS"
+        bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+        portrait = client.post("/api/v1/browser/portrait", headers=bh)
+        assert portrait.status_code == 422, portrait.text
+        assert portrait.json()["error"]["code"] == "PORTRAIT_QUALITY_FAILED"
+        store: TransactionFileStore = app.state.transaction_store
+        internal = _internal_tx_id(client, None)
+        assert not store.artifact_exists(internal, "portrait/processed.jpg")
+        assert store.read_transaction_json(internal)["status"] != "TECHNICAL_ERROR"
+
+
+def test_browser_portrait_malformed_face_box_is_blocked(tmp_path) -> None:
+    for bad in ("0.9,0.2,0.3,0.3", "0.5,0.5,0.01,0.4", "nan,0.2,0.3,0.4", "1,2,3"):
+        sub = tmp_path / bad.replace(",", "_").replace(".", "")
+        sub.mkdir(parents=True, exist_ok=True)
+        app = _liveness_app(sub)
+        with TestClient(app) as client:
+            cookies = _active_cookies(client)
+            res = _capture_and_liveness(client, cookies, "a1", face_box=bad)
+            assert res.status_code == 200 and res.json()["outcome"] == "PASS"
+            bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+            portrait = client.post("/api/v1/browser/portrait", headers=bh)
+            assert portrait.status_code == 422, (bad, portrait.text)
+            assert portrait.json()["error"]["code"] == "PORTRAIT_QUALITY_FAILED"
+
+
+def test_browser_stale_face_box_not_reused_after_new_capture(tmp_path) -> None:
+    app = _liveness_app(tmp_path)
+    with TestClient(app) as client:
+        cookies = _active_cookies(client)
+        bh = _browser_headers(cookies["lp_session"], cookies["lp_csrf"])
+        # Capture A WITH a valid box -> PASS.
+        res_a = _capture_and_liveness(client, cookies, "cap-A", face_box=_FACE_BOX)
+        assert res_a.json()["outcome"] == "PASS"
+        # Capture B (new capture) WITHOUT a box -> PASS, but B's box is absent.
+        res_b = _capture_and_liveness(
+            client, cookies, "cap-B", jpeg=_jpeg_bytes(64, 64), face_box=""
+        )
+        assert res_b.json()["outcome"] == "PASS"
+        # Portrait must NOT reuse capture A's stale box: B has no box -> retryable failure.
+        portrait = client.post("/api/v1/browser/portrait", headers=bh)
+        assert portrait.status_code == 422, portrait.text
+        assert portrait.json()["error"]["code"] == "PORTRAIT_QUALITY_FAILED"
+
+
+def test_browser_face_box_persisted_in_current_capture_metadata(tmp_path) -> None:
+    app = _liveness_app(tmp_path)
+    with TestClient(app) as client:
+        cookies = _active_cookies(client)
+        _capture_and_liveness(client, cookies, "a1", face_box=_FACE_BOX)
+        store: TransactionFileStore = app.state.transaction_store
+        internal = _internal_tx_id(client, None)
+        meta = store.read_json(internal, "capture/capture.json")
+        assert meta["face_box"] == [0.35, 0.28, 0.30, 0.26]
+        assert liveness.current_capture_face_box(store, internal) == (0.35, 0.28, 0.30, 0.26)

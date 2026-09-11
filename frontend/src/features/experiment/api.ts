@@ -67,16 +67,19 @@ export interface TransactionCreateResult {
   status: string
 }
 
-/** Create a transaction folder and persist the selected original capture (M5.7 §2, §17). */
+/** Create a transaction folder and persist the selected original capture (M5.7 §2, §17). The
+ *  optional primary normalized face box is persisted with the capture (geometry guidance only). */
 export async function createTransaction(
   image: Blob,
   captureConfigVersion: string,
   qualityConfigVersion: string,
+  faceBoxNormalized?: string,
 ): Promise<TransactionCreateResult> {
   const form = new FormData()
   form.append('image', image, 'selected-original.jpg')
   form.append('capture_config_version', captureConfigVersion)
   form.append('quality_config_version', qualityConfigVersion)
+  if (faceBoxNormalized) form.append('face_box', faceBoxNormalized)
   const data: unknown = await apiPostMultipart('/api/v1/transactions', form, 15_000)
   const parsed = transactionCreateSchema.parse(data)
   return { transactionId: parsed.transaction_id, status: parsed.status }

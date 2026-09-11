@@ -44,7 +44,12 @@ from app.integrations.callback import (
 from app.integrations.consumers import ConsumerProfile
 from app.integrations.store import IntegrationIndexStore
 from app.observability import metrics
-from app.portrait import PortraitErrorCode, PortraitProcessingError, PortraitProcessor
+from app.portrait import (
+    PortraitErrorCode,
+    PortraitProcessingError,
+    PortraitProcessor,
+    parse_normalized_face_box,
+)
 from app.providers.vision import VlmError
 from app.transactions import ArtifactType, TransactionStatus
 from app.transactions.decisions import build_decision, read_decision, write_decision
@@ -235,6 +240,7 @@ async def browser_capture(
     selected_image: UploadFile = File(...),  # noqa: B008
     capture_config_version: str = Form(""),
     quality_config_version: str = Form(""),
+    face_box: str = Form(""),
 ) -> Response:
     record = require_active_session(request)
     require_csrf(request, record)
@@ -245,6 +251,10 @@ async def browser_capture(
 
     data = await _read_bounded(selected_image, settings.vlm_max_single_image_bytes)
     mime = _validate_image(data, selected_image.content_type or "image/jpeg")
+    # Primary normalized face box (geometry guidance only) bound to THIS capture; validated
+    # strictly and persisted so portrait processing uses the current capture's box (never a stale
+    # POST value or a previous capture's box).
+    capture_face_box = parse_normalized_face_box(face_box)
 
     # Atomically under the transaction lock: register the attempt (at-most-once, one upload per
     # attempt) AND persist the new capture. Accepting a new capture supersedes/invalidates the
@@ -290,6 +300,7 @@ async def browser_capture(
                 "sha256": sha256_hex(data),
                 "capture_config_version": capture_config_version,
                 "quality_config_version": quality_config_version,
+                "face_box": list(capture_face_box) if capture_face_box else None,
             },
         )
         # Supersede the previous capture's authorization (defense in depth: remove old artifacts).
@@ -469,6 +480,18 @@ async def browser_portrait(request: Request, face_box: str = Form("")) -> Respon
             PortraitErrorCode.PORTRAIT_PROCESSING_FAILED, "portrait processing is disabled"
         )
 
+    # The CURRENT capture's persisted face box is authoritative (bound to attempt_id + SHA); a
+    # valid same-request box is a compatibility fallback only. Missing/invalid -> retryable
+    # quality failure (resolved BEFORE any claim/status mutation so no claim is left dangling).
+    face_box_normalized = liveness.current_capture_face_box(
+        store, internal_tx_id
+    ) or parse_normalized_face_box(face_box)
+    if face_box_normalized is None:
+        raise PortraitProcessingError(
+            PortraitErrorCode.PORTRAIT_QUALITY_FAILED,
+            "a valid primary face box is required for portrait processing",
+        )
+
     from app.transactions import ArtifactReference
 
     # Single-flight per liveness identity, under a short lock (no processing while holding it).
@@ -512,13 +535,20 @@ async def browser_portrait(request: Request, face_box: str = Form("")) -> Respon
         relative_path="capture/selected-original.jpg",
         content_type="image/jpeg",
     )
+    # Primary normalized face box (geometry guidance only — never an authorization input) anchors
+    # the matte/refinement and the structural integrity gate.
     processor = PortraitProcessor(
         settings, store, segmentation=getattr(request.app.state, "portrait_segmentation", None)
     )
     # Process into an identity-specific candidate (never directly overwrite the authoritative
     # portrait/processed.jpg while another capture may be in flight).
     try:
-        await processor.process(source_ref, internal_tx_id, output_relative_path=candidate_rel)
+        await processor.process(
+            source_ref,
+            internal_tx_id,
+            face_box_normalized=face_box_normalized,
+            output_relative_path=candidate_rel,
+        )
     except Exception:
         _clear_portrait_claim(store, internal_tx_id, identity)
         raise

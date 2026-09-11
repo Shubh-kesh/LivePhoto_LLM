@@ -46,14 +46,17 @@ export async function registerAttempt(
   return apiPostMultipart('/api/v1/browser/attempts', form)
 }
 
-/** Upload a selected capture frame for an attempt (M5.8 §13). */
+/** Upload a selected capture frame for an attempt (M5.8 §13). The optional primary normalized face
+ *  box is persisted with the capture (geometry guidance only, not security evidence). */
 export async function uploadCapture(
   attemptId: string,
   image: Blob,
+  faceBoxNormalized?: string,
   filename = 'selected-original.jpg',
 ): Promise<unknown> {
   const form = new FormData()
   form.append('attempt_id', attemptId)
+  if (faceBoxNormalized) form.append('face_box', faceBoxNormalized)
   form.append('selected_image', image, filename)
   return apiPostMultipart('/api/v1/browser/capture', form, 20_000)
 }
@@ -77,9 +80,11 @@ export async function browserLiveness(): Promise<{
   }
 }
 
-/** Trigger backend portrait processing (requires canonical PASS). */
-export async function triggerPortrait(): Promise<unknown> {
+/** Trigger backend portrait processing (requires canonical PASS). The optional face box is
+ *  geometry guidance only (never an authorization input). */
+export async function triggerPortrait(faceBoxNormalized?: string): Promise<unknown> {
   const form = new FormData()
+  if (faceBoxNormalized) form.append('face_box', faceBoxNormalized)
   return apiPostMultipart('/api/v1/browser/portrait', form, 60_000)
 }
 

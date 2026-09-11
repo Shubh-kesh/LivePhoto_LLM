@@ -19,7 +19,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { Button, ScreenLayout, StatusMessage } from '../../design-system'
 import { CapturePage } from '../capture/CapturePage'
-import { livenessRetryMessage } from '../capture/copy'
+import { livenessRetryMessage, portraitPreparationErrorMessage } from '../capture/copy'
+import { selectedFaceBoxParam } from '../capture/quality/faceBox'
 import type { CaptureAttempt, UseCaptureFlowResult } from '../capture/hooks/useCaptureFlow'
 import {
   allowlistedAttemptReason,
@@ -134,8 +135,14 @@ export function IntegrationPage() {
         setCaptureError('Your photo could not be prepared. Please try again.')
         return
       }
+      // Primary normalized face box (geometry guidance only) persisted with the capture so portrait
+      // processing uses the CURRENT capture's box; also passed to the portrait request as fallback.
+      const faceBox = selectedFaceBoxParam(
+        flow.qualityAssessment,
+        flow.bundle?.representativeFrameId,
+      )
       // Automatic upload of the M3-selected frame with the SAME attempt_id (at-most-once).
-      await uploadCapture(attemptId, selected)
+      await uploadCapture(attemptId, selected, faceBox)
       // Server-authoritative liveness: the backend evaluates the stored image with the configured
       // provider (VLM_PROVIDER); the browser never chooses the provider and never writes PASS.
       // Portrait proceeds ONLY when the backend confirms LIVE (canonical PASS). No test-PASS writer.
@@ -158,12 +165,13 @@ export function IntegrationPage() {
         setCaptureError(livenessRetryMessage(liveness.reason_codes))
         return
       }
-      await triggerPortrait()
+      // Portrait proceeds ONLY for backend-confirmed LIVE with the current capture's face box.
+      await triggerPortrait(faceBox)
       setPortraitUrl('/api/v1/browser/portrait')
       setCaptureDone(true)
       setPhase((prev) => (prev ? { ...prev, submissionReady: true } : prev))
-    } catch {
-      setCaptureError('Your photo could not be prepared. Please try again.')
+    } catch (caught) {
+      setCaptureError(portraitPreparationErrorMessage(caught))
     } finally {
       processingRef.current = false
     }

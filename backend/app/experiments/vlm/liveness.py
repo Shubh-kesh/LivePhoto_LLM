@@ -42,6 +42,7 @@ from app.core.config import Settings
 from app.core.logging import get_logger
 from app.domain.decision import DecisionOutcome
 from app.experiments.vlm.service import ExperimentEvaluateRequest, VlmEvaluationService
+from app.portrait.integrity import validate_face_box_values
 from app.providers.vision import PROMPT_VERSION, VLM_SCHEMA_VERSION
 from app.providers.vision.models import ImageInput, SecondaryPersonState, SubjectCount
 from app.transactions import ArtifactType
@@ -194,6 +195,24 @@ def expected_liveness_identity(store: TransactionFileStore, transaction_id: str)
     if key is None:
         return None
     return liveness_identity(key["attempt_id"], key["selected_sha256"])
+
+
+def current_capture_face_box(
+    store: TransactionFileStore, transaction_id: str
+) -> tuple[float, float, float, float] | None:
+    """Primary normalized face box persisted with the CURRENT capture (geometry guidance only).
+
+    Read from ``capture/capture.json`` (bound to the current attempt_id + selected SHA), so a stale
+    box from a previous capture can never be used for a newer capture. Returns None when absent or
+    invalid.
+    """
+    if not store.artifact_exists(transaction_id, CAPTURE_META_RELATIVE_PATH):
+        return None
+    try:
+        meta = store.read_json(transaction_id, CAPTURE_META_RELATIVE_PATH)
+    except Exception:
+        return None
+    return validate_face_box_values(meta.get("face_box"))
 
 
 def invalidate_authorization(store: TransactionFileStore, transaction_id: str) -> None:

@@ -114,6 +114,7 @@ export function VlmExperimentPanel({ bundle, quality }: VlmExperimentPanelProps)
           representativeFrame.blob,
           captureConfig.configVersion,
           qualityConfig.configVersion,
+          faceBoxNormalized,
         )
         txId = created.transactionId
         setTransactionId(txId)

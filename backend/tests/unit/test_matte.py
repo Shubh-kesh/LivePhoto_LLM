@@ -76,4 +76,4 @@ def test_no_face_anchor_falls_back_to_centroid() -> None:
 
 
 def test_version_constant() -> None:
-    assert MATTE_REFINEMENT_VERSION == "matte-refinement-v2"
+    assert MATTE_REFINEMENT_VERSION == "matte-refinement-v3"

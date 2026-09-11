@@ -10,6 +10,7 @@ from PIL import Image
 from app.core.config import Settings
 from app.factory import create_app
 from app.transactions import TransactionFileStore
+from app.transactions.ids import INTERNAL_TRANSACTION_ID_PATTERN
 
 
 def _jpeg_bytes(width: int = 96, height: int = 128) -> bytes:
@@ -36,11 +37,15 @@ def _make_app(tmp_path, **overrides: object):
     return app
 
 
-def _create_transaction(client: TestClient) -> str:
+def _create_transaction(client: TestClient, face_box: str = "0.35,0.28,0.30,0.26") -> str:
     response = client.post(
         "/api/v1/transactions",
         files={"image": ("sel.jpg", _jpeg_bytes(), "image/jpeg")},
-        data={"capture_config_version": "capture-v1", "quality_config_version": "quality-v1"},
+        data={
+            "capture_config_version": "capture-v1",
+            "quality_config_version": "quality-v1",
+            "face_box": face_box,
+        },
     )
     assert response.status_code == 200, response.text
     return response.json()["transaction_id"]
@@ -274,3 +279,84 @@ def test_transaction_liveness_idempotent_single_provider_call(tmp_path, monkeypa
         assert second.status_code == 200
         assert first.json() == second.json()
     assert calls[0] == 1  # second call served from the persisted evaluation
+
+
+# --------------------------------------------- internal transaction IDs (pre-M6)
+def test_standalone_create_transaction_uses_new_internal_id(tmp_path) -> None:
+    app = _make_app(tmp_path, vlm_provider="mock", vlm_mock_behavior="live")
+    with TestClient(app) as client:
+        tx_id = _create_transaction(client)
+    # LivePhoto-generated internal ID, not a bare 32-hex UUID.
+    assert INTERNAL_TRANSACTION_ID_PATTERN.fullmatch(tx_id)
+    store: TransactionFileStore = app.state.transaction_store
+    assert store.transaction_exists(tx_id)
+    assert store.read_transaction_json(tx_id)["transaction_id"] == tx_id
+    assert store.read_json(tx_id, "capture/capture.json")["transaction_id"] == tx_id
+
+
+def test_new_internal_id_full_flow_capture_liveness_portrait(tmp_path) -> None:
+    app = _make_app(tmp_path, vlm_provider="mock", vlm_mock_behavior="live")
+    with TestClient(app) as client:
+        tx_id = _create_transaction(client)
+        assert INTERNAL_TRANSACTION_ID_PATTERN.fullmatch(tx_id)
+        liveness = client.post(f"/api/v1/transactions/{tx_id}/liveness")
+        assert liveness.status_code == 200
+        assert liveness.json()["outcome"] == "PASS"
+        portrait = client.post(f"/api/v1/transactions/{tx_id}/portrait")
+        assert portrait.status_code == 200
+        artifact = client.get(f"/api/v1/transactions/{tx_id}/artifacts/PROCESSED_PORTRAIT")
+        assert artifact.status_code == 200
+    store: TransactionFileStore = app.state.transaction_store
+    assert store.artifact_exists(tx_id, "portrait/processed.jpg")
+
+
+def test_legacy_uuid_style_transaction_id_remains_readable(tmp_path) -> None:
+    app = _make_app(tmp_path, vlm_provider="mock", vlm_mock_behavior="live")
+    legacy = "2c0b407711a6448aa0730c81d84ecff9"
+    with TestClient(app) as client:
+        store: TransactionFileStore = app.state.transaction_store
+        store.create_transaction(legacy, {"transaction_id": legacy, "status": "CREATED"})
+        # The route accepts the legacy ID (not a 400 invalid-id); missing artifact is a 404.
+        response = client.get(f"/api/v1/transactions/{legacy}/artifacts/PROCESSED_PORTRAIT")
+        assert response.status_code == 404
+        assert store.transaction_exists(legacy)
+        assert store.read_transaction_json(legacy)["transaction_id"] == legacy
+
+
+# ------------------------------------ face box required + bound to capture (pre-M6)
+def test_standalone_portrait_missing_face_box_is_retryable(tmp_path) -> None:
+    app = _make_app(tmp_path, vlm_provider="mock", vlm_mock_behavior="live")
+    with TestClient(app) as client:
+        tx_id = _create_transaction(client, face_box="")
+        liv = client.post(f"/api/v1/transactions/{tx_id}/liveness")
+        assert liv.json()["outcome"] == "PASS"
+        portrait = client.post(f"/api/v1/transactions/{tx_id}/portrait")
+        assert portrait.status_code == 422, portrait.text
+        assert portrait.json()["error"]["code"] == "PORTRAIT_QUALITY_FAILED"
+        store: TransactionFileStore = app.state.transaction_store
+        assert not store.artifact_exists(tx_id, "portrait/processed.jpg")
+        assert store.read_transaction_json(tx_id)["status"] != "TECHNICAL_ERROR"
+
+
+def test_standalone_portrait_malformed_face_box_is_blocked(tmp_path) -> None:
+    for bad in ("0.9,0.2,0.3,0.3", "0.5,0.5,0.01,0.4", "nan,0.2,0.3,0.4"):
+        app = _make_app(
+            tmp_path / bad.replace(",", "_").replace(".", ""),
+            vlm_provider="mock",
+            vlm_mock_behavior="live",
+        )
+        with TestClient(app) as client:
+            tx_id = _create_transaction(client, face_box=bad)
+            client.post(f"/api/v1/transactions/{tx_id}/liveness")
+            portrait = client.post(f"/api/v1/transactions/{tx_id}/portrait")
+            assert portrait.status_code == 422, (bad, portrait.text)
+            assert portrait.json()["error"]["code"] == "PORTRAIT_QUALITY_FAILED"
+
+
+def test_standalone_capture_persists_face_box_bound_to_capture(tmp_path) -> None:
+    app = _make_app(tmp_path, vlm_provider="mock", vlm_mock_behavior="live")
+    with TestClient(app) as client:
+        tx_id = _create_transaction(client, face_box="0.4,0.3,0.2,0.2")
+    store: TransactionFileStore = app.state.transaction_store
+    meta = store.read_json(tx_id, "capture/capture.json")
+    assert meta["face_box"] == [0.4, 0.3, 0.2, 0.2]

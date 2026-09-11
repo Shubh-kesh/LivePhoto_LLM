@@ -155,6 +155,7 @@ function eligibleAssessment(bundle: CaptureBundle, index: number): FrameQualityA
       detectionConfidence: 0.95,
       coverageRatio: 0.3,
       centerOffset: { dx: 0, dy: 0, distance: 0 },
+      normalizedBoundingBox: { x: 0.25, y: 0.2, width: 0.5, height: 0.5 },
     },
     exposure: { meanLuminance: 0.5, darkPixelRatio: 0.05, brightPixelRatio: 0.05 },
     contrast: { rawValue: 0.2 },

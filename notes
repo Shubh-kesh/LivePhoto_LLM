@@ -4,6 +4,8 @@ cloudflared tunnel --url http://localhost:8000
 
 npm run dev -- --host 0.0.0.0 --force
 
+ssh -p 443 -R0:localhost:8000 a.pinggy.io
+ssh -p 443 -R0:localhost:5173 a.pinggy.io
 
 node e2e/stub-consumer.mjs
 

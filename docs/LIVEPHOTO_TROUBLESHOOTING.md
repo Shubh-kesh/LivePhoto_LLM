@@ -846,3 +846,48 @@ distant/background -> may continue).
 
 **Status:** Implemented (authoritative backend gate); background-vs-interfering accuracy on real
 captures is validated only by the manual mobile/laptop test plan, not by synthetic tests.
+
+---
+
+## 22. Portrait corrupted: fragmented raw MODNet matte promoted as SUCCESS
+
+**Milestone:** pre-M6
+**Type:** Code Bug (portrait quality)
+**Confirmed transaction:** `LP-20260910T150524236Z-7B4136` (720x1280, harsh/night lighting).
+**Symptom:** portrait processing returned SUCCESS but a substantial part of the primary face/head
+was missing (white hole / left-side loss).
+
+**Root cause:** raw MODNet alpha was already badly fragmented in the primary face/head region
+(diagnostic: raw alphas left 0.1085 vs right 0.3430; ~32k pixels removed by refinement, almost all
+on the subject's left). Connected-component refinement then deleted additional legitimate subject
+pixels. A successful JPEG encode was mistaken for a valid portrait. Neither crop nor Cloudflare were
+involved.
+
+**Fix:**
+1. The standalone `/capture` streamlined path now passes the M3 primary normalized face box to
+   `processPortrait`; `/xbiz` passes it to `triggerPortrait` (backend `POST /browser/portrait`
+   parses `face_box`). Geometry guidance only — never an authorization input.
+2. New deterministic structural gate `app/portrait/integrity.py`
+   (`portrait-matte-integrity-v1`) validates the RAW matte in the primary face/head ROI (face
+   retention, head retention, left/right balance, primary-component coverage). A catastrophic raw
+   matte raises the retryable `PORTRAIT_QUALITY_FAILED`.
+3. `refine_matte` (`matte-refinement-v3`) skips destructive disconnected-component removal when the
+   selected primary component does not credibly cover the face (preserving the raw matte).
+4. After refinement the gate runs again; if refinement damages the face, the raw matte (which
+   passed) is used instead. Only a matte that passes can reach crop/composite/encode.
+
+**Re-test (same source):** with the primary face box, raw face retention 0.233 / balance 0.331 /
+component overlap 0.057 → `PORTRAIT_QUALITY_FAILED`; no portrait promoted; the transaction returns to
+its pre-portrait (non-technical) state so the user can Retry. Safe metrics logged (no image
+bytes/PII/secrets).
+
+**Status/retry semantics and face-box binding:**
+- `PORTRAIT_QUALITY_FAILED` returns **HTTP 422** (not 500) with the customer-safe retry message; the
+  transaction is never marked `TECHNICAL_ERROR`.
+- The primary normalized face box is persisted with the current capture (`capture/capture.json`,
+  bound to transaction/attempt/SHA) by both `/capture` and `/xbiz` at upload; portrait processing
+  reads the current capture's box, so a stale box from a previous capture can never be reused.
+- A missing/invalid (non-finite, negative, zero/oversized, out-of-frame) face box fails closed with
+  `PORTRAIT_QUALITY_FAILED` — there is no weak-validation fallback for customer portrait generation.
+
+**Status:** Fixed (structural quality gate + required, capture-bound face box).

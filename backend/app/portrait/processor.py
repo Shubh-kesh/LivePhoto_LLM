@@ -22,8 +22,14 @@ from app.core.logging import get_logger
 from app.portrait.background import composite_solid, parse_background_color
 from app.portrait.crop import CROP_VERSION, CropBox, passport_crop
 from app.portrait.errors import (
+    RETRYABLE_PORTRAIT_CODES,
     PortraitErrorCode,
     PortraitProcessingError,
+)
+from app.portrait.integrity import (
+    MATTE_INTEGRITY_VERSION,
+    refinement_is_acceptable,
+    validate_portrait_matte,
 )
 from app.portrait.matte import MATTE_REFINEMENT_VERSION, refine_matte
 from app.portrait.segmentation import OnnxPortraitSegmentation, SegmentationProvider
@@ -37,7 +43,7 @@ from app.transactions import (
 
 logger = get_logger("livephoto.portrait")
 
-PROCESSOR_VERSION = "portrait-processor-v4"
+PROCESSOR_VERSION = "portrait-processor-v5"
 ALPHA_REFINE_RADIUS = 1.0
 
 
@@ -114,7 +120,11 @@ class PortraitProcessor:
         # In candidate mode the caller owns the authoritative status/promotion; this run must not
         # mutate the transaction's state (a stale candidate must never touch a newer capture).
         candidate_mode = output_relative_path is not None
+        previous_status: str | None = None
         if not candidate_mode:
+            previous_status = (
+                str(self._store.read_transaction_json(transaction_id).get("status", "")) or None
+            )
             self._store.update_transaction_status(transaction_id, "PORTRAIT_PROCESSING")
         started = time.perf_counter()
         model = self._provider().info
@@ -132,10 +142,12 @@ class PortraitProcessor:
         try:
             image_bytes = self._store.read_artifact(transaction_id, source.relative_path)
             image = self._decode(image_bytes)
-            alpha = self._provider().predict_alpha(image)
-            # Region-aware matte refinement: body reinforced, hair kept soft, disconnected
-            # background regions removed, primary person anchored to the face (M5.7 correction).
-            alpha = refine_matte(alpha, face_box_normalized=face_box_normalized)
+            raw_alpha = self._provider().predict_alpha(image)
+            # Fail-closed structural integrity of the PRIMARY face/head region, evaluated on the RAW
+            # matte before any destructive refinement, then again after refinement. A technically
+            # successful encode must never promote a visually corrupted portrait (confirmed real
+            # failure: fragmented raw matte + refinement erasing valid subject pixels).
+            alpha = self._resolve_matte(raw_alpha, image, face_box_normalized, transaction_id)
             alpha = self._refine_alpha(alpha)
             crop_box = passport_crop(
                 alpha,
@@ -240,9 +252,19 @@ class PortraitProcessor:
             return result
         except Exception as exc:
             if isinstance(exc, PortraitProcessingError):
+                # PORTRAIT_QUALITY_FAILED is an expected retryable quality outcome, not a
+                # technical error: record it but restore the pre-portrait state for retry.
+                retryable_quality = exc.code in RETRYABLE_PORTRAIT_CODES
                 self._record_failure(
-                    transaction_id, source, model, exc.code.value, candidate_mode=candidate_mode
+                    transaction_id,
+                    source,
+                    model,
+                    exc.code.value,
+                    candidate_mode=candidate_mode,
+                    set_technical_error=not retryable_quality,
                 )
+                if retryable_quality and not candidate_mode and previous_status:
+                    self._store.update_transaction_status(transaction_id, previous_status)
                 raise
             if isinstance(exc, (UnidentifiedImageError, OSError, ValueError)):
                 self._record_failure(
@@ -264,6 +286,62 @@ class PortraitProcessor:
                 "portrait processing failed",
             ) from exc
 
+    def _resolve_matte(
+        self,
+        raw_alpha: np.ndarray,
+        image: Image.Image,
+        face_box_normalized: tuple[float, float, float, float] | None,
+        transaction_id: str,
+    ) -> np.ndarray:
+        """Validate the raw matte, refine it, and never promote refinement-damaged corruption.
+
+        Returns the alpha matte to composite. Raises ``PORTRAIT_QUALITY_FAILED`` when the raw matte
+        is structurally unusable in the primary face/head region (no fallback can authorize it).
+        When refinement fails integrity or materially damages the face compared to raw, the raw
+        matte (which passed the gate) is used instead.
+        """
+        if raw_alpha.shape != (image.height, image.width):
+            # Shape mismatch: the existing crop dimension check raises PORTRAIT_INVALID_SOURCE.
+            return refine_matte(raw_alpha, face_box_normalized=face_box_normalized)
+
+        raw_integrity = validate_portrait_matte(raw_alpha, face_box_normalized)
+        if not raw_integrity.ok:
+            logger.info(
+                "portrait_matte_integrity_failed",
+                transaction_id=transaction_id,
+                stage="raw",
+                integrity_version=MATTE_INTEGRITY_VERSION,
+                integrity_result=raw_integrity.reason,
+                has_face_box=raw_integrity.has_face_box,
+                raw_face_retention=round(raw_integrity.face_retention, 4),
+                head_retention=round(raw_integrity.head_retention, 4),
+                left_right_balance=round(raw_integrity.balance, 4),
+                component_face_overlap=round(raw_integrity.component_face_overlap, 4),
+            )
+            raise PortraitProcessingError(
+                PortraitErrorCode.PORTRAIT_QUALITY_FAILED,
+                "portrait matte is structurally unusable in the primary face/head region",
+            )
+
+        refined = refine_matte(raw_alpha, face_box_normalized=face_box_normalized)
+        refined_integrity = validate_portrait_matte(refined, face_box_normalized)
+        reverted = not refinement_is_acceptable(raw_integrity, refined_integrity)
+        effective = raw_alpha if reverted else refined
+        logger.info(
+            "portrait_matte_integrity",
+            transaction_id=transaction_id,
+            integrity_version=MATTE_INTEGRITY_VERSION,
+            integrity_result="ok",
+            refinement_action="reverted_to_raw" if reverted else "refined",
+            has_face_box=raw_integrity.has_face_box,
+            raw_face_retention=round(raw_integrity.face_retention, 4),
+            refined_face_retention=round(refined_integrity.face_retention, 4),
+            head_retention=round(raw_integrity.head_retention, 4),
+            left_right_balance=round(raw_integrity.balance, 4),
+            component_face_overlap=round(raw_integrity.component_face_overlap, 4),
+        )
+        return effective
+
     def _record_failure(
         self,
         transaction_id: str,
@@ -272,8 +350,9 @@ class PortraitProcessor:
         error_code: str,
         *,
         candidate_mode: bool = False,
+        set_technical_error: bool = True,
     ) -> None:
-        if not candidate_mode:
+        if not candidate_mode and set_technical_error:
             self._store.update_transaction_status(transaction_id, "TECHNICAL_ERROR")
         logger.info(
             "portrait_processing_failed",

@@ -5,6 +5,7 @@
 
 import type { FlowError } from './hooks/flowError'
 import type { QualityReasonCode } from './quality/types/quality'
+import { ApiClientError } from '../../api/client'
 
 export const captureCopy = {
   brand: {
@@ -200,6 +201,18 @@ export function retryCopyForReasonCodes(reasonCodes: readonly QualityReasonCode[
 
 export function internalRetryCopy(): RetryCopy {
   return { title: captureCopy.qualityRetry.unknown, body: captureCopy.qualityRetry.generic }
+}
+
+/**
+ * Safe customer message for a backend portrait-preparation failure. The structural
+ * PORTRAIT_QUALITY_FAILED case gets a specific "couldn't prepare clearly" retry message; every
+ * other preparation failure keeps the generic message. Never exposes model/threshold internals.
+ */
+export function portraitPreparationErrorMessage(error: unknown): string {
+  if (error instanceof ApiClientError && error.code === 'PORTRAIT_QUALITY_FAILED') {
+    return "We couldn't prepare this photo clearly. Please try again."
+  }
+  return 'Your photo could not be prepared. Please try again.'
 }
 
 /**
