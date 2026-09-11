@@ -91,3 +91,33 @@ intended files; never stage `.env`, model weights, captures, or test media.
 - Do not make spoof/liveness accuracy claims from mock/synthetic tests.
 - Keep an evidence-based completion report distinguishing:
   `implemented`, `tested`, `manually verified`, `not tested`, `known limitation`.
+
+## ARCHITECTURE DOCUMENTATION RULE
+
+Architecture documentation is a living artefact and **must be updated whenever a change affects**:
+
+- application flow, user journey, model pipeline, decision flow,
+- security/authority boundary, integration flow,
+- transaction/artifact flow, retry/failure flow, deployment/runtime architecture.
+
+Required steps:
+
+1. Update `docs/CURRENT_APPLICATION_ARCHITECTURE.md` when the overall application architecture
+   changes.
+2. Update `docs/FEATURE_FLOW_ARCHITECTURE.md` for the affected feature (including its
+   `### Evolution history` table). Record each change as
+   `Before → After → Why`.
+3. Mark anything not yet implemented explicitly as `NOT IMPLEMENTED`; never mix future architecture
+   with current architecture.
+4. Architecture documentation must be updated **before commit**.
+5. Every final implementation report must explicitly include one of:
+
+   ```text
+   Architecture documentation impact: UPDATED
+   ```
+
+   or
+
+   ```text
+   Architecture documentation impact: NONE
+   ```
